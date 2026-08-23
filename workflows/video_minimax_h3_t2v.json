@@ -1,0 +1,4 @@
+{
+  "_source": "https://raw.githubusercontent.com/Comfy-Org/workflow_templates/main/templates/video_minimax_h3_t2v.json",
+  "_note": "The official workflow is fetched into /workspace/workflows at runtime to keep this repository small."
+}

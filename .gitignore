@@ -1,0 +1,10 @@
+.env
+*.token
+*.secret
+*.safetensors
+/workspace/
+/models/
+/runtime-workspace/
+__pycache__/
+*.pyc
+env

@@ -1,0 +1,10 @@
+.git
+.gitignore
+.env
+*.token
+*.secret
+*.safetensors
+workspace
+runtime-workspace
+__pycache__
+*.pyc
