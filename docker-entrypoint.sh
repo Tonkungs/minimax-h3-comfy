@@ -3,9 +3,15 @@ set -Eeuo pipefail
 
 PROJECT_ROOT="${H3_PROJECT_ROOT:-/opt/minimax-h3}"
 PYTHON_BIN="${H3_PYTHON:-/venv/main/bin/python}"
+AUTH_PROXY="${PROJECT_ROOT}/scripts/auth_proxy.py"
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "[h3][error] Python runtime not found at $PYTHON_BIN" >&2
+  exit 1
+fi
+
+if [[ -z "${CF_TOKEN:-}" ]]; then
+  echo "[h3][error] CF_TOKEN is required; refusing to start an unauthenticated service" >&2
   exit 1
 fi
 
@@ -26,6 +32,12 @@ cp -f "${PROJECT_ROOT}/custom_node/web/minimax_h3_autoload.js" "${AUTOLOAD_DIR}/
 if [[ -s /workspace/workflows/video_minimax_h3_i2v.json ]]; then
   cp -f /workspace/workflows/video_minimax_h3_i2v.json "${AUTOLOAD_DIR}/web/video_minimax_h3_i2v.json"
 fi
+
+for mapping in "19111 11111" "19188 18188" "19288 18288" "19080 18080" "19384 18384"; do
+  read -r listen target <<<"$mapping"
+  nohup "$PYTHON_BIN" "$AUTH_PROXY" "$listen" "$target" \
+    >>"/var/log/portal/h3-auth-proxy-${listen}.log" 2>&1 &
+done
 
 # Vast's base supervisor starts tunnel_manager and ComfyUI in parallel. Replace
 # only the tunnel command with a small gate so Cloudflare cannot connect before

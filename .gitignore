@@ -1,4 +1,6 @@
 .env
+.runtime.env
+env
 *.token
 *.secret
 *.safetensors

@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 IMAGE_NAME="${IMAGE_NAME:-minimax-h3-comfy}"
-IMAGE_TAG="${IMAGE_TAG:-0.1.0}"
+IMAGE_TAG="${IMAGE_TAG:-0.2.0}"
 CONTAINER_NAME="${CONTAINER_NAME:-minimax-h3-comfy}"
 IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,13 +20,14 @@ if [[ "${USE_GPU:-1}" != "1" && " $comfy_args " != *" --cpu "* ]]; then
 fi
 
 ports=(
-  -p 1111:11111 -p 8080:18080 -p 8384:18384
-  -p 8188:18188 -p 8288:18288
+  -p 1111:19111 -p 8080:19080 -p 8384:19384
+  -p 8188:19188 -p 8288:19288
 )
 
 common_env=(
   -e "COMFYUI_ARGS=${comfy_args}"
   -e "COMFYUI_API_BASE=${COMFYUI_API_BASE:-http://localhost:18188}"
+  -e CF_TOKEN
   -e "OPEN_BUTTON_PORT=${OPEN_BUTTON_PORT:-1111}"
   -e "OPEN_BUTTON_TOKEN=${OPEN_BUTTON_TOKEN:-1}"
   -e "JUPYTER_DIR=${JUPYTER_DIR:-/}"
@@ -35,7 +36,7 @@ common_env=(
   -e "MODEL_PRESET=${MODEL_PRESET:-5090}"
   -e "DOWNLOAD_MODE=${DOWNLOAD_MODE:-missing}"
   -e "H3_PYTHON=${H3_PYTHON:-/venv/main/bin/python}"
-  -e "PORTAL_CONFIG=${PORTAL_CONFIG:-localhost:1111:11111:/:Instance Portal|localhost:8188:18188:/:ComfyUI|localhost:8288:18288:/docs:API Wrapper|localhost:8188:18188:/:ComfyUI|localhost:8080:18080:/:Jupyter|localhost:8080:8080:/terminals/1:Jupyter Terminal|localhost:8384:18384:/:Syncthing}"
+  -e "PORTAL_CONFIG=${PORTAL_CONFIG:-localhost:1111:19111:/:Instance Portal|localhost:8188:19188:/:ComfyUI|localhost:8288:19288:/docs:API Wrapper|localhost:8188:19188:/:ComfyUI|localhost:8080:19080:/:Jupyter|localhost:8080:8080:/terminals/1:Jupyter Terminal|localhost:8384:19384:/:Syncthing}"
 )
 
 usage() {
@@ -49,9 +50,12 @@ fi
 
 case "${1:-}" in
   build)
-    docker build --platform linux/amd64 -t "$IMAGE" "$ROOT_DIR"
+    docker build --platform linux/amd64 \
+      --build-arg "COMFY_SOURCE_IMAGE=${COMFY_SOURCE_IMAGE:-vastai/comfy:v0.32.0-cuda-13.2-py312}" \
+      -t "$IMAGE" "$ROOT_DIR"
     ;;
   probe)
+    : "${CF_TOKEN:?Set CF_TOKEN in the shell or env-file; service will not start without it}"
     : "${HF_TOKEN:?Set HF_TOKEN in the shell; do not put it in this repository}"
     docker run --rm "${gpu_flags[@]}" --name "$CONTAINER_NAME-probe" \
       "${ports[@]}" "${common_env[@]}" \
@@ -62,6 +66,7 @@ case "${1:-}" in
       "$IMAGE"
     ;;
   run)
+    : "${CF_TOKEN:?Set CF_TOKEN in the shell or env-file; service will not start without it}"
     if [[ "${DOWNLOAD_MODE:-missing}" != "skip" ]]; then
       : "${HF_TOKEN:?Set HF_TOKEN in the shell; do not put it in this repository}"
     fi
