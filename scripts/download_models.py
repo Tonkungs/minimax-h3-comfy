@@ -125,7 +125,6 @@ def download(item: dict, root: Path, index: int, count: int, batch_total: int, b
             total = int(response.headers.get("Content-Length", "0") or 0)
             downloaded = 0
             next_report = 0
-            started = time.monotonic()
             print(
                 f"[h3][download-start] {item['name']}"
                 + (f" ({total / (1024**3):.2f} GB)" if total else ""),
@@ -135,28 +134,18 @@ def download(item: dict, root: Path, index: int, count: int, batch_total: int, b
                 output.write(chunk)
                 downloaded += len(chunk)
                 if downloaded >= next_report:
-                    if total:
-                        percent = downloaded / total * 100
-                        print(
-                            f"[h3][download-progress] {item['name']}: "
-                            f"{percent:.1f}% ({downloaded / (1024**3):.2f}/"
-                            f"{total / (1024**3):.2f} GB)",
-                            flush=True,
-                        )
-                    else:
-                        print(
-                            f"[h3][download-progress] {item['name']}: "
-                            f"{downloaded / (1024**3):.2f} GB",
-                            flush=True,
-                        )
+                    current_percent = downloaded / total * 100 if total else 0
                     elapsed = time.monotonic() - batch_started
                     overall = (batch_done + downloaded) / batch_total * 100 if batch_total else 100
                     speed = (batch_done + downloaded) / elapsed if elapsed > 0 else 0
                     eta = (batch_total - batch_done - downloaded) / speed if speed > 0 else 0
                     print(
-                        f"[h3][overall] file {index}/{count}, {overall:.1f}% of "
-                        f"{batch_total / (1024**3):.2f} GB, speed "
-                        f"{speed / (1024**2):.1f} MB/s, elapsed {format_duration(elapsed)}, "
+                        f"[h3][progress] file {index}/{count} | {item['name']} | "
+                        f"current {current_percent:.1f}% ({downloaded / (1024**3):.2f}/"
+                        f"{total / (1024**3):.2f} GB) | overall {overall:.1f}% "
+                        f"({(batch_done + downloaded) / (1024**3):.2f}/"
+                        f"{batch_total / (1024**3):.2f} GB) | speed "
+                        f"{speed / (1024**2):.1f} MB/s | elapsed {format_duration(elapsed)} | "
                         f"ETA {format_duration(eta)}",
                         flush=True,
                     )
