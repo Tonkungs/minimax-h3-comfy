@@ -97,10 +97,38 @@ def download(item: dict, root: Path) -> None:
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
         with urlopen(request, timeout=120) as response, temporary.open("wb") as output:
+            total = int(response.headers.get("Content-Length", "0") or 0)
+            downloaded = 0
+            next_report = 0
+            print(
+                f"[h3][download-start] {item['name']}"
+                + (f" ({total / (1024**3):.2f} GB)" if total else ""),
+                flush=True,
+            )
             while chunk := response.read(8 * 1024 * 1024):
                 output.write(chunk)
+                downloaded += len(chunk)
+                if downloaded >= next_report:
+                    if total:
+                        percent = downloaded / total * 100
+                        print(
+                            f"[h3][download-progress] {item['name']}: "
+                            f"{percent:.1f}% ({downloaded / (1024**3):.2f}/"
+                            f"{total / (1024**3):.2f} GB)",
+                            flush=True,
+                        )
+                    else:
+                        print(
+                            f"[h3][download-progress] {item['name']}: "
+                            f"{downloaded / (1024**3):.2f} GB",
+                            flush=True,
+                        )
+                    next_report = downloaded + 256 * 1024 * 1024
         temporary.replace(destination)
-        print(f"[h3][downloaded] {destination}")
+        print(
+            f"[h3][downloaded] {destination} ({downloaded / (1024**3):.2f} GB)",
+            flush=True,
+        )
     except (HTTPError, URLError, OSError) as exc:
         temporary.unlink(missing_ok=True)
         fail(f"download failed for {item['name']}: {exc}")
