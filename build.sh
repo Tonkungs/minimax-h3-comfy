@@ -20,8 +20,8 @@ if [[ "${USE_GPU:-1}" != "1" && " $comfy_args " != *" --cpu "* ]]; then
 fi
 
 ports=(
-  -p 1111:19111 -p 8080:19080 -p 8384:19384
-  -p 8188:19188 -p 8288:19288
+  -p 1111:1111 -p 8080:8080 -p 8384:8384
+  -p 8188:8188 -p 8288:8288
 )
 
 common_env=(
@@ -36,7 +36,7 @@ common_env=(
   -e "MODEL_PRESET=${MODEL_PRESET:-5090}"
   -e "DOWNLOAD_MODE=${DOWNLOAD_MODE:-missing}"
   -e "H3_PYTHON=${H3_PYTHON:-/venv/main/bin/python}"
-  -e "PORTAL_CONFIG=${PORTAL_CONFIG:-localhost:1111:19111:/:Instance Portal|localhost:8188:19188:/:ComfyUI|localhost:8288:19288:/docs:API Wrapper|localhost:8188:19188:/:ComfyUI|localhost:8080:19080:/:Jupyter|localhost:8080:8080:/terminals/1:Jupyter Terminal|localhost:8384:19384:/:Syncthing}"
+  -e "PORTAL_CONFIG=${PORTAL_CONFIG:-localhost:1111:19111:/:Instance Portal|localhost:19188:19188:/:ComfyUI|localhost:8288:19288:/docs:API Wrapper|localhost:8080:19080:/:Jupyter|localhost:8384:19384:/:Syncthing}"
 )
 
 usage() {
