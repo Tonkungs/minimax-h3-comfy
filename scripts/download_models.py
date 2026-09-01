@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -69,6 +70,29 @@ def verify_access(token: str) -> None:
         fail(f"Hugging Face access failed for {REPO_ID}: {exc}")
 
 
+def format_duration(seconds: float) -> str:
+    if seconds <= 0:
+        return "calculating"
+    seconds = int(seconds)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s"
+
+
+def file_sizes(token: str, items: list[dict]) -> dict[str, int]:
+    try:
+        info = HfApi(token=token or None).model_info(REPO_ID, revision=REVISION, files_metadata=True)
+        sizes = {s.rfilename: (s.size or 0) for s in info.siblings}
+        missing = [item["path"] for item in items if not sizes.get(item["path"])]
+        if missing:
+            fail("size metadata missing for: " + ", ".join(missing))
+        return sizes
+    except Exception as exc:
+        fail(f"cannot read model sizes: {exc}")
+
+
 def probe(item: dict, root: Path, byte_count: int) -> None:
     url = hf_hub_url(REPO_ID, item["path"], revision=REVISION)
     request = Request(url, headers={**auth_headers(), "Range": f"bytes=0-{byte_count - 1}"})
@@ -85,12 +109,13 @@ def probe(item: dict, root: Path, byte_count: int) -> None:
         fail(f"probe failed for {item['name']}: {exc}")
 
 
-def download(item: dict, root: Path) -> None:
+def download(item: dict, root: Path, index: int, count: int, batch_total: int, batch_done: int, batch_started: float) -> int:
     destination = root / item["destination"] / item["name"]
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists() and destination.stat().st_size > 0:
-        print(f"[h3][skip] {item['name']} already exists")
-        return
+        size = destination.stat().st_size
+        print(f"[h3][skip] {item['name']} already exists ({size / (1024**3):.2f} GB)", flush=True)
+        return size
 
     url = hf_hub_url(REPO_ID, item["path"], revision=REVISION)
     request = Request(url, headers=auth_headers())
@@ -100,6 +125,7 @@ def download(item: dict, root: Path) -> None:
             total = int(response.headers.get("Content-Length", "0") or 0)
             downloaded = 0
             next_report = 0
+            started = time.monotonic()
             print(
                 f"[h3][download-start] {item['name']}"
                 + (f" ({total / (1024**3):.2f} GB)" if total else ""),
@@ -123,12 +149,24 @@ def download(item: dict, root: Path) -> None:
                             f"{downloaded / (1024**3):.2f} GB",
                             flush=True,
                         )
+                    elapsed = time.monotonic() - batch_started
+                    overall = (batch_done + downloaded) / batch_total * 100 if batch_total else 100
+                    speed = (batch_done + downloaded) / elapsed if elapsed > 0 else 0
+                    eta = (batch_total - batch_done - downloaded) / speed if speed > 0 else 0
+                    print(
+                        f"[h3][overall] file {index}/{count}, {overall:.1f}% of "
+                        f"{batch_total / (1024**3):.2f} GB, speed "
+                        f"{speed / (1024**2):.1f} MB/s, elapsed {format_duration(elapsed)}, "
+                        f"ETA {format_duration(eta)}",
+                        flush=True,
+                    )
                     next_report = downloaded + 256 * 1024 * 1024
         temporary.replace(destination)
         print(
             f"[h3][downloaded] {destination} ({downloaded / (1024**3):.2f} GB)",
             flush=True,
         )
+        return downloaded
     except (HTTPError, URLError, OSError) as exc:
         temporary.unlink(missing_ok=True)
         fail(f"download failed for {item['name']}: {exc}")
@@ -148,7 +186,9 @@ def main() -> None:
     token = os.environ.get("HF_TOKEN", "").strip()
     verify_access(token)
     items = selected_files(manifest)
-    print(f"[h3] selected {len(items)} model file(s)")
+    sizes = file_sizes(token, items)
+    total_size = sum(sizes[item["path"]] for item in items)
+    print(f"[h3] selected {len(items)} model file(s), total {total_size / (1024**3):.2f} GB", flush=True)
 
     if mode == "probe":
         byte_count = max(1024, int(os.environ.get("MODEL_PROBE_BYTES", "1048576")))
@@ -157,9 +197,12 @@ def main() -> None:
         print("[h3] probe complete; no full model was downloaded")
         return
 
-    for item in items:
-        download(item, root)
-    print("[h3] model download complete")
+    batch_done = 0
+    batch_started = time.monotonic()
+    for index, item in enumerate(items, 1):
+        batch_done += download(item, root, index, len(items), total_size, batch_done, batch_started)
+    elapsed = time.monotonic() - batch_started
+    print(f"[h3] model download complete: {len(items)} files, {total_size / (1024**3):.2f} GB, elapsed {format_duration(elapsed)}", flush=True)
 
 
 if __name__ == "__main__":
