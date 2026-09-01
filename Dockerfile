@@ -14,6 +14,7 @@ ENV MODEL_ROOT=/workspace/models \
     MODEL_PROBE_BYTES=1048576 \
     H3_PROJECT_ROOT=/opt/minimax-h3 \
     H3_PYTHON=/venv/main/bin/python \
+    COMFYUI_DIR=/opt/workspace-internal/ComfyUI \
     COMFYUI_ARGS="--disable-auto-launch --disable-xformers --port 18188 --enable-cors-header"
 
 # Keep Vast's Portal/Supervisor stack and copy only the tested GPU runtime and

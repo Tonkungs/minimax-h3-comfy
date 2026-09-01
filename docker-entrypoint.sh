@@ -24,7 +24,7 @@ mkdir -p /workspace/output /workspace/workflows
 
 # Install the frontend extension and serve the fetched official workflow from
 # ComfyUI's extension directory. This makes the I2V graph load on page open.
-COMFYUI_DIR="${COMFYUI_DIR:-/workspace/ComfyUI}"
+COMFYUI_DIR="${COMFYUI_DIR:-/opt/workspace-internal/ComfyUI}"
 AUTOLOAD_DIR="${COMFYUI_DIR}/custom_nodes/minimax_h3_autoload"
 mkdir -p "${AUTOLOAD_DIR}/web"
 cp -f "${PROJECT_ROOT}/custom_node/__init__.py" "${AUTOLOAD_DIR}/__init__.py"

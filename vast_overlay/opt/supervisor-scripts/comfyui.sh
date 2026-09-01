@@ -10,7 +10,7 @@ if [[ "${SERVERLESS:-false}" != "true" ]]; then
   . "${utils}/exit_portal.sh" "ComfyUI"
 fi
 
-COMFYUI_DIR="${WORKSPACE:-/workspace}/ComfyUI"
+COMFYUI_DIR="${COMFYUI_DIR:-/opt/workspace-internal/ComfyUI}"
 . /venv/main/bin/activate
 
 if [[ ! -f /.provisioning && -f "${COMFYUI_DIR}/requirements.txt" ]]; then
