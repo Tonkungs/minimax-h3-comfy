@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 PROJECT_ROOT="${H3_PROJECT_ROOT:-/opt/minimax-h3}"
 PYTHON_BIN="${H3_PYTHON:-/venv/main/bin/python}"
+AUTH_PROXY="${PROJECT_ROOT}/scripts/auth_proxy.py"
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "[h3][error] Python runtime not found at $PYTHON_BIN" >&2
@@ -26,6 +27,17 @@ cp -f "${PROJECT_ROOT}/custom_node/web/minimax_h3_autoload.js" "${AUTOLOAD_DIR}/
 if [[ -s /workspace/workflows/video_minimax_h3_i2v.json ]]; then
   cp -f /workspace/workflows/video_minimax_h3_i2v.json "${AUTOLOAD_DIR}/web/video_minimax_h3_i2v.json"
 fi
+
+# Keep Cloudflare's tunnel credential separate from the HTTP auth boundary.
+# Fall back to CF_TOKEN for backwards compatibility with existing templates.
+AUTH_TOKEN="${H3_AUTH_TOKEN:-${CF_TOKEN:-}}"
+if [[ -z "$AUTH_TOKEN" ]]; then
+  echo "[h3][error] H3_AUTH_TOKEN (or CF_TOKEN fallback) is required" >&2
+  exit 1
+fi
+export H3_AUTH_TOKEN="$AUTH_TOKEN"
+nohup "$PYTHON_BIN" "$AUTH_PROXY" 18189 18188 \
+  >>/var/log/portal/h3-auth-proxy-18189.log 2>&1 &
 
 # Wait for ComfyUI before letting Vast's existing tunnel manager connect.
 if [[ -f /etc/supervisor/conf.d/tunnel_manager.conf ]]; then

@@ -115,7 +115,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     import os
 
-    token = os.environ.get("CF_TOKEN", "")
+    token = os.environ.get("H3_AUTH_TOKEN", "")
     if not token:
         raise SystemExit("CF_TOKEN is required")
     asyncio.run(main(args.listen, args.target, token))
