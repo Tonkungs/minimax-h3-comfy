@@ -40,8 +40,8 @@ if [[ -z "$AUTH_TOKEN" ]]; then
   exit 1
 fi
 export H3_AUTH_TOKEN="$AUTH_TOKEN"
-nohup "$PYTHON_BIN" "$AUTH_PROXY" 18189 18188 \
-  >>/var/log/portal/h3-auth-proxy-18189.log 2>&1 &
+nohup "$PYTHON_BIN" "$AUTH_PROXY" 8188 18188 \
+  >>/var/log/portal/h3-auth-proxy-8188.log 2>&1 &
 
 # Wait for ComfyUI before letting Vast's existing tunnel manager connect.
 for _ in $(seq 1 120); do
