@@ -10,3 +10,14 @@ workspace
 runtime-workspace
 __pycache__
 *.pyc
+**/__pycache__
+**/*.pyc
+.DS_Store
+*.log
+*.tmp
+*.part
+node_modules
+.venv
+venv
+dist
+build
