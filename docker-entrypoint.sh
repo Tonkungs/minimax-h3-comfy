@@ -17,6 +17,10 @@ fi
 
 echo "[h3] model_root=${MODEL_ROOT:-/workspace/models} preset=${MODEL_PRESET:-5090} mode=${DOWNLOAD_MODE:-missing}"
 
+# Vast's base image exposes a Caddy route on 8188 which bypasses our token
+# proxy. Remove that supervisor program before binding the protected route.
+find /etc/supervisor/conf.d -maxdepth 1 -type f -iname '*caddy*.conf' -delete 2>/dev/null || true
+
 "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/download_models.py"
 
 "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/fetch_workflows.py"
@@ -33,7 +37,7 @@ if [[ -s /workspace/workflows/video_minimax_h3_i2v.json ]]; then
   cp -f /workspace/workflows/video_minimax_h3_i2v.json "${AUTOLOAD_DIR}/web/video_minimax_h3_i2v.json"
 fi
 
-for mapping in "19111 11111" "19188 18188" "19288 18288" "19080 18080" "19384 18384"; do
+for mapping in "19111 11111" "8188 18188" "19288 18288" "19080 18080" "19384 18384"; do
   read -r listen target <<<"$mapping"
   nohup "$PYTHON_BIN" "$AUTH_PROXY" "$listen" "$target" \
     >>"/var/log/portal/h3-auth-proxy-${listen}.log" 2>&1 &

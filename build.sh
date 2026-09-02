@@ -36,7 +36,7 @@ common_env=(
   -e "MODEL_PRESET=${MODEL_PRESET:-5090}"
   -e "DOWNLOAD_MODE=${DOWNLOAD_MODE:-missing}"
   -e "H3_PYTHON=${H3_PYTHON:-/venv/main/bin/python}"
-  -e "PORTAL_CONFIG=${PORTAL_CONFIG:-localhost:1111:19111:/:Instance Portal|localhost:8188:19188:/:ComfyUI|localhost:8288:19288:/docs:API Wrapper|localhost:8080:19080:/:Jupyter|localhost:8384:19384:/:Syncthing}"
+  -e "PORTAL_CONFIG=${PORTAL_CONFIG:-localhost:1111:19111:/:Instance Portal|localhost:8188:8188:/:ComfyUI|localhost:8288:19288:/docs:API Wrapper|localhost:8080:19080:/:Jupyter|localhost:8384:19384:/:Syncthing}"
 )
 
 usage() {
