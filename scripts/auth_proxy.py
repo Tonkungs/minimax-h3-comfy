@@ -95,7 +95,11 @@ async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.Str
         # Consume the token at the auth boundary. Forwarding it upstream is
         # unnecessary and causes redirect-based clients to lose authentication.
         upstream_path = path
-        upstream_lines = [f"{method} {upstream_path} {version}"] + lines[1:]
+        is_websocket = headers.get("upgrade", "").lower() == "websocket"
+        forwarded_headers = [line for line in lines[1:] if not line.lower().startswith(("connection:", "keep-alive:"))]
+        if not is_websocket:
+            forwarded_headers.append("Connection: close")
+        upstream_lines = [f"{method} {upstream_path} {version}"] + forwarded_headers
         upstream_writer.write("\r\n".join(upstream_lines).encode("iso-8859-1"))
         await upstream_writer.drain()
         await asyncio.gather(
