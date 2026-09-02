@@ -48,6 +48,17 @@ async def send_error(writer: asyncio.StreamWriter) -> None:
     await writer.drain()
 
 
+async def set_auth_cookie(writer: asyncio.StreamWriter, path: str, token: str) -> None:
+    location = clean_path(path)
+    cookie = f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax"
+    writer.write(
+        b"HTTP/1.1 302 Found\r\n"
+        + f"Location: {location}\r\nSet-Cookie: {cookie}\r\n".encode("iso-8859-1")
+        + b"Cache-Control: no-store\r\nContent-Length: 0\r\n\r\n"
+    )
+    await writer.drain()
+
+
 async def relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
     try:
         while data := await reader.read(65536):
@@ -76,10 +87,14 @@ async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.Str
             await send_error(client_writer)
             return
 
+        if from_query:
+            await set_auth_cookie(client_writer, path, token)
+            return
+
         upstream_reader, upstream_writer = await asyncio.open_connection(*target)
         # Consume the token at the auth boundary. Forwarding it upstream is
         # unnecessary and causes redirect-based clients to lose authentication.
-        upstream_path = clean_path(path) if from_query else path
+        upstream_path = path
         upstream_lines = [f"{method} {upstream_path} {version}"] + lines[1:]
         upstream_writer.write("\r\n".join(upstream_lines).encode("iso-8859-1"))
         await upstream_writer.drain()
