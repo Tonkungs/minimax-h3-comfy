@@ -8,7 +8,7 @@ on:
 
 env:
   IMAGE_NAME: tonkung/minimax-h3-comfy
-  IMAGE_TAG: 1.0.0
+  IMAGE_TAG: 1.1.0
 
 jobs:
   build-and-push:

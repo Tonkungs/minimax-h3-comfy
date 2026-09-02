@@ -96,7 +96,7 @@ async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.Str
         # unnecessary and causes redirect-based clients to lose authentication.
         upstream_path = path
         is_websocket = headers.get("upgrade", "").lower() == "websocket"
-        forwarded_headers = [line for line in lines[1:] if not line.lower().startswith(("connection:", "keep-alive:"))]
+        forwarded_headers = [line for line in lines[1:] if line and not line.lower().startswith(("connection:", "keep-alive:"))]
         if not is_websocket:
             forwarded_headers.append("Connection: close")
         upstream_lines = [f"{method} {upstream_path} {version}"] + forwarded_headers
