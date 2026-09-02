@@ -44,6 +44,10 @@ nohup "$PYTHON_BIN" "$AUTH_PROXY" 18189 18188 \
   >>/var/log/portal/h3-auth-proxy-18189.log 2>&1 &
 
 # Wait for ComfyUI before letting Vast's existing tunnel manager connect.
+for _ in $(seq 1 120); do
+  [[ -f /etc/supervisor/conf.d/tunnel_manager.conf ]] && break
+  sleep 1
+done
 if [[ -f /etc/supervisor/conf.d/tunnel_manager.conf ]]; then
   cp -f "${PROJECT_ROOT}/scripts/start_tunnel_after_comfyui.sh" \
     /opt/minimax-h3/start_tunnel_after_comfyui.sh
