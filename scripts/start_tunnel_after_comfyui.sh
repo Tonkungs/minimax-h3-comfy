@@ -14,7 +14,7 @@ while true; do
     # Vast's tunnel manager reads external_port from portal.yaml. In Docker,
     # that is the published host port, so bridge it to the service's internal
     # port before cloudflared starts.
-    for mapping in "1111 19111" "8188 19188" "8288 19288" "8080 19080" "8384 19384"; do
+    for mapping in "1111 11111" "8188 18188" "8288 18288" "8080 18080" "8384 18384"; do
       read -r listen target <<<"$mapping"
       if ! (echo >/dev/tcp/127.0.0.1/${listen}) >/dev/null 2>&1; then
         nohup "$H3_PYTHON" "$PORT_PROXY" "$listen" "$target" \

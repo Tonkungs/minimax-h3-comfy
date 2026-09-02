@@ -3,23 +3,13 @@ set -Eeuo pipefail
 
 PROJECT_ROOT="${H3_PROJECT_ROOT:-/opt/minimax-h3}"
 PYTHON_BIN="${H3_PYTHON:-/venv/main/bin/python}"
-AUTH_PROXY="${PROJECT_ROOT}/scripts/auth_proxy.py"
 
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "[h3][error] Python runtime not found at $PYTHON_BIN" >&2
   exit 1
 fi
 
-if [[ -z "${CF_TOKEN:-}" ]]; then
-  echo "[h3][error] CF_TOKEN is required; refusing to start an unauthenticated service" >&2
-  exit 1
-fi
-
 echo "[h3] model_root=${MODEL_ROOT:-/workspace/models} preset=${MODEL_PRESET:-5090} mode=${DOWNLOAD_MODE:-missing}"
-
-# Vast's base image exposes a Caddy route on 8188 which bypasses our token
-# proxy. Remove that supervisor program before binding the protected route.
-find /etc/supervisor/conf.d -maxdepth 1 -type f -iname '*caddy*.conf' -delete 2>/dev/null || true
 
 "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/download_models.py"
 
@@ -37,15 +27,7 @@ if [[ -s /workspace/workflows/video_minimax_h3_i2v.json ]]; then
   cp -f /workspace/workflows/video_minimax_h3_i2v.json "${AUTOLOAD_DIR}/web/video_minimax_h3_i2v.json"
 fi
 
-for mapping in "19111 11111" "8188 18188" "19288 18288" "19080 18080" "19384 18384"; do
-  read -r listen target <<<"$mapping"
-  nohup "$PYTHON_BIN" "$AUTH_PROXY" "$listen" "$target" \
-    >>"/var/log/portal/h3-auth-proxy-${listen}.log" 2>&1 &
-done
-
-# Vast's base supervisor starts tunnel_manager and ComfyUI in parallel. Replace
-# only the tunnel command with a small gate so Cloudflare cannot connect before
-# ComfyUI is accepting HTTP requests.
+# Wait for ComfyUI before letting Vast's existing tunnel manager connect.
 if [[ -f /etc/supervisor/conf.d/tunnel_manager.conf ]]; then
   cp -f "${PROJECT_ROOT}/scripts/start_tunnel_after_comfyui.sh" \
     /opt/minimax-h3/start_tunnel_after_comfyui.sh
