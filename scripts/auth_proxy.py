@@ -100,7 +100,7 @@ async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.Str
         if not is_websocket:
             forwarded_headers.append("Connection: close")
         upstream_lines = [f"{method} {upstream_path} {version}"] + forwarded_headers
-        upstream_writer.write("\r\n".join(upstream_lines).encode("iso-8859-1"))
+        upstream_writer.write(("\r\n".join(upstream_lines) + "\r\n\r\n").encode("iso-8859-1"))
         await upstream_writer.drain()
         await asyncio.gather(
             relay(client_reader, upstream_writer),
