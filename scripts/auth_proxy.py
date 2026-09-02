@@ -5,7 +5,7 @@ import asyncio
 import hashlib
 import http.cookies
 import secrets
-from urllib.parse import parse_qs, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qs, quote, unquote, urlencode, urlsplit, urlunsplit
 
 
 COOKIE_NAME = "h3_auth"
@@ -22,7 +22,7 @@ def request_token(path: str, headers: dict[str, str]) -> tuple[str | None, bool]
 
     cookies = http.cookies.SimpleCookie(headers.get("cookie", ""))
     if COOKIE_NAME in cookies:
-        return cookies[COOKIE_NAME].value, False
+        return unquote(cookies[COOKIE_NAME].value), False
 
     query = parse_qs(urlsplit(path).query).get("token", [])
     return (query[0] if query else None), bool(query)
@@ -50,7 +50,7 @@ async def send_error(writer: asyncio.StreamWriter) -> None:
 
 async def set_auth_cookie(writer: asyncio.StreamWriter, path: str, token: str) -> None:
     location = clean_path(path)
-    cookie = f"{COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax"
+    cookie = f"{COOKIE_NAME}={quote(token, safe='')}; Path=/; HttpOnly; SameSite=Lax"
     writer.write(
         b"HTTP/1.1 302 Found\r\n"
         + f"Location: {location}\r\nSet-Cookie: {cookie}\r\n".encode("iso-8859-1")
