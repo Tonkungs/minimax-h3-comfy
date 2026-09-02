@@ -12,6 +12,10 @@ fi
 
 echo "[h3] model_root=${MODEL_ROOT:-/workspace/models} preset=${MODEL_PRESET:-5090} mode=${DOWNLOAD_MODE:-missing}"
 
+# The Vast Comfy image includes a Caddy basic-auth listener on 8188. Remove it
+# so our token proxy can own the published ComfyUI route.
+find /etc/supervisor/conf.d -maxdepth 1 -type f -iname '*caddy*.conf' -delete 2>/dev/null || true
+
 "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/download_models.py"
 
 "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/fetch_workflows.py"
