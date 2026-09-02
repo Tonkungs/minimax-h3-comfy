@@ -53,11 +53,4 @@ if [[ -f /etc/supervisor/conf.d/tunnel_manager.conf ]]; then
     /etc/supervisor/conf.d/tunnel_manager.conf
 fi
 
-# The Vast base image owns the portal, Jupyter and ComfyUI startup contract.
-# Keep that entrypoint so the supplied PORTAL_CONFIG and COMFYUI_ARGS continue
-# to work. Fall back to direct ComfyUI startup for local debugging only.
-if [[ -x /opt/instance-tools/bin/entrypoint.sh ]]; then
-  exec /opt/instance-tools/bin/entrypoint.sh "$@"
-fi
-
-exec "$PYTHON_BIN" "${COMFYUI_DIR}/main.py" ${COMFYUI_ARGS:-"--disable-auto-launch --disable-xformers --port 18188 --enable-cors-header"}
+echo "[h3] preparation complete; Vast base entrypoint owns service startup"

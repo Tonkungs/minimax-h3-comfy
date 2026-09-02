@@ -31,5 +31,3 @@ EXPOSE 1111 8080 8188 8288 8384 19080 19111 19188 19288 19384
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=45s --retries=5 \
   CMD "$H3_PYTHON" /opt/minimax-h3/scripts/healthcheck.py || exit 1
-
-ENTRYPOINT ["/opt/minimax-h3/docker-entrypoint.sh"]
