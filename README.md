@@ -92,6 +92,27 @@ The supplied
 `COMFYUI_ARGS`, `PORTAL_CONFIG`, `MODEL_PRESET`, `MODEL_FILES`, and
 `DOWNLOAD_MODE` can be overridden with environment variables.
 
+For a custom download list, set `MODEL_MANIFEST_JSON` to a JSON array of
+`url`, `description`, `destination`, and `download` entries. Set `download`
+to `false` to exclude a file; omitted `download` defaults to `true`. The
+filename is derived from the URL and an existing file at that destination is
+replaced. Alternatively,
+set `MODEL_MANIFEST_URL` to a public GitHub Raw (or other HTTP(S)) JSON URL, or
+set `MODEL_MANIFEST` to a mounted JSON file path. If none are set, the bundled
+manifest and preset behavior are unchanged. The priority is
+`MODEL_MANIFEST_JSON`, `MODEL_MANIFEST_URL`, `MODEL_MANIFEST`, then the bundled
+file. Example:
+
+```json
+[{"url":"https://example.com/model.safetensors","description":"custom model","destination":"diffusion_models","download":true}]
+```
+
+Example URL override:
+
+```text
+MODEL_MANIFEST_URL=https://raw.githubusercontent.com/USER/REPO/main/model-manifest.json
+```
+
 ## Cloudflare and CF_TOKEN authentication
 
 The container refuses to start unless `CF_TOKEN` is set. Every Cloudflare

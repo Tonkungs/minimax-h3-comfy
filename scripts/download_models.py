@@ -9,13 +9,14 @@ import sys
 import time
 from pathlib import Path
 from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from huggingface_hub import HfApi, hf_hub_url
 
 
 PROJECT_ROOT = Path(os.environ.get("H3_PROJECT_ROOT", "/opt/minimax-h3"))
-MANIFEST_PATH = PROJECT_ROOT / "config" / "model-manifest.json"
+DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "config" / "model-manifest.json"
 REPO_ID = "Comfy-Org/MiniMax-H3"
 REVISION = "main"
 
@@ -26,15 +27,48 @@ def fail(message: str) -> "NoReturn":
 
 
 def load_manifest() -> dict:
+    inline = os.environ.get("MODEL_MANIFEST_JSON", "").strip()
+    remote_url = os.environ.get("MODEL_MANIFEST_URL", "").strip()
+    manifest_path = Path(os.environ.get("MODEL_MANIFEST", str(DEFAULT_MANIFEST_PATH)))
     try:
-        return json.loads(MANIFEST_PATH.read_text())
-    except (OSError, json.JSONDecodeError) as exc:
+        if inline:
+            manifest = json.loads(inline)
+        elif remote_url:
+            if urlparse(remote_url).scheme not in {"http", "https"}:
+                fail("MODEL_MANIFEST_URL must use http or https")
+            request = Request(remote_url, headers={"Accept": "application/json"})
+            with urlopen(request, timeout=60) as response:
+                manifest = json.loads(response.read().decode("utf-8"))
+        else:
+            manifest = json.loads(manifest_path.read_text())
+    except (OSError, HTTPError, URLError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         fail(f"cannot read manifest: {exc}")
+    if isinstance(manifest, list):
+        normalized = []
+        for entry in manifest:
+            if not isinstance(entry, dict) or not entry.get("url") or not entry.get("destination"):
+                fail("override manifest entries require url and destination")
+            url = str(entry["url"])
+            name = str(entry.get("name") or unquote(urlparse(url).path.rstrip("/").split("/")[-1]))
+            if not name:
+                fail(f"cannot derive filename from URL: {url}")
+            if not isinstance(entry.get("download", True), bool):
+                fail(f"download must be boolean for {name}")
+            normalized.append({**entry, "name": name, "path": url, "direct_url": True})
+        return {"files": normalized, "presets": {"override": [item["name"] for item in normalized]}}
+    if not isinstance(manifest, dict) or "files" not in manifest:
+        fail("manifest must be an object with files or a JSON array of url entries")
+    for item in manifest["files"]:
+        if not isinstance(item.get("download", True), bool):
+            fail(f"download must be boolean for {item.get('name', '<unnamed>')}")
+    return manifest
 
 
 def selected_files(manifest: dict) -> list[dict]:
-    files = manifest["files"]
-    preset = os.environ.get("MODEL_PRESET", "5090").strip().lower()
+    files = [item for item in manifest["files"] if item.get("download", True)]
+    preset = os.environ.get("MODEL_PRESET", "").strip().lower()
+    if not preset:
+        preset = "override" if "override" in manifest["presets"] else "5090"
     raw_custom = os.environ.get("MODEL_FILES", "").strip()
 
     by_name = {item["name"]: item for item in files}
@@ -82,6 +116,16 @@ def format_duration(seconds: float) -> str:
 
 
 def file_sizes(token: str, items: list[dict]) -> dict[str, int]:
+    if any(item.get("direct_url") for item in items):
+        sizes = {}
+        for item in items:
+            request = Request(item["url"], method="HEAD", headers=auth_headers())
+            try:
+                with urlopen(request, timeout=60) as response:
+                    sizes[item["path"]] = int(response.headers.get("Content-Length", "0") or 0)
+            except (HTTPError, URLError, OSError) as exc:
+                fail(f"cannot read size for {item['name']}: {exc}")
+        return sizes
     try:
         info = HfApi(token=token or None).model_info(REPO_ID, revision=REVISION, files_metadata=True)
         sizes = {s.rfilename: (s.size or 0) for s in info.siblings}
@@ -94,7 +138,7 @@ def file_sizes(token: str, items: list[dict]) -> dict[str, int]:
 
 
 def probe(item: dict, root: Path, byte_count: int) -> None:
-    url = hf_hub_url(REPO_ID, item["path"], revision=REVISION)
+    url = item["url"] if item.get("direct_url") else hf_hub_url(REPO_ID, item["path"], revision=REVISION)
     request = Request(url, headers={**auth_headers(), "Range": f"bytes=0-{byte_count - 1}"})
     destination = root / item["destination"] / f".probe-{item['name']}"
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -112,12 +156,12 @@ def probe(item: dict, root: Path, byte_count: int) -> None:
 def download(item: dict, root: Path, index: int, count: int, batch_total: int, batch_done: int, batch_started: float) -> int:
     destination = root / item["destination"] / item["name"]
     destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists() and destination.stat().st_size > 0:
+    if destination.exists() and destination.stat().st_size > 0 and not item.get("direct_url"):
         size = destination.stat().st_size
         print(f"[h3][skip] {item['name']} already exists ({size / (1024**3):.2f} GB)", flush=True)
         return size
 
-    url = hf_hub_url(REPO_ID, item["path"], revision=REVISION)
+    url = item["url"] if item.get("direct_url") else hf_hub_url(REPO_ID, item["path"], revision=REVISION)
     request = Request(url, headers=auth_headers())
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
@@ -173,8 +217,9 @@ def main() -> None:
         return
 
     token = os.environ.get("HF_TOKEN", "").strip()
-    verify_access(token)
     items = selected_files(manifest)
+    if not any(item.get("direct_url") for item in items):
+        verify_access(token)
     sizes = file_sizes(token, items)
     total_size = sum(sizes[item["path"]] for item in items)
     print(f"[h3] selected {len(items)} model file(s), total {total_size / (1024**3):.2f} GB", flush=True)
