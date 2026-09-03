@@ -33,10 +33,10 @@ if [[ -s /workspace/workflows/video_minimax_h3_i2v.json ]]; then
 fi
 
 # Keep Cloudflare's tunnel credential separate from the HTTP auth boundary.
-# Fall back to CF_TOKEN for backwards compatibility with existing templates.
-AUTH_TOKEN="${H3_AUTH_TOKEN:-${CF_TOKEN:-}}"
+# CF_TOKEN is the primary browser/API auth token; retain H3_AUTH_TOKEN for legacy templates.
+AUTH_TOKEN="${CF_TOKEN:-${H3_AUTH_TOKEN:-}}"
 if [[ -z "$AUTH_TOKEN" ]]; then
-  echo "[h3][error] H3_AUTH_TOKEN (or CF_TOKEN fallback) is required" >&2
+  echo "[h3][error] CF_TOKEN is required (H3_AUTH_TOKEN is accepted for legacy templates)" >&2
   exit 1
 fi
 export H3_AUTH_TOKEN="$AUTH_TOKEN"
