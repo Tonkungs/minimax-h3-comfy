@@ -15,6 +15,10 @@ echo "[h3] model_root=${MODEL_ROOT:-/workspace/models} preset=${MODEL_PRESET:-50
 # The Vast Comfy image includes a Caddy basic-auth listener on 8188. Remove it
 # so our token proxy can own the published ComfyUI route.
 find /etc/supervisor/conf.d -maxdepth 1 -type f -iname '*caddy*.conf' -delete 2>/dev/null || true
+# A base-image Caddy process may already have been spawned by the time this
+# hook runs. Stop it explicitly; otherwise it can loop on :8080 and prevent
+# the mapped services from becoming reachable.
+pkill -TERM -x caddy 2>/dev/null || true
 
 "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/download_models.py"
 
