@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 IMAGE_NAME="${IMAGE_NAME:-minimax-h3-comfy}"
-IMAGE_TAG="${IMAGE_TAG:-0.2.0}"
+IMAGE_TAG="${IMAGE_TAG:-0.3.0}"
 CONTAINER_NAME="${CONTAINER_NAME:-minimax-h3-comfy}"
 IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -51,7 +51,7 @@ fi
 case "${1:-}" in
   build)
     docker build --platform linux/amd64 \
-      --build-arg "COMFY_SOURCE_IMAGE=${COMFY_SOURCE_IMAGE:-vastai/comfy:v0.32.0-cuda-13.2-py312}" \
+      --build-arg "COMFY_SOURCE_IMAGE=${COMFY_SOURCE_IMAGE:-vastai/comfy:v0.36.0-cuda-13.2-py312}" \
       -t "$IMAGE" "$ROOT_DIR"
     ;;
   probe)

@@ -10,3 +10,6 @@ env
 __pycache__/
 *.pyc
 env
+/preview/
+/promt
+/outputs

@@ -1,4 +1,4 @@
-FROM vastai/comfy:v0.30.0-cuda-13.2-py312
+FROM vastai/comfy:v0.36.0-cuda-13.2-py312
 
 USER root
 
@@ -9,7 +9,7 @@ ENV MODEL_ROOT=/workspace/models \
     H3_PROJECT_ROOT=/opt/minimax-h3 \
     H3_PYTHON=/venv/main/bin/python \
     COMFYUI_DIR=/opt/workspace-internal/ComfyUI \
-    COMFYUI_ARGS="--disable-auto-launch --disable-xformers --port 18188 --enable-cors-header"
+    COMFYUI_ARGS="--disable-auto-launch --disable-xformers --port 18188 --enable-cors-header --fast fp16_accumulation --use-sage-attention"
 
 RUN set -Eeuo pipefail \
     && mkdir -p /workspace/models /workspace/output /workspace/workflows

@@ -1,9 +1,13 @@
 [
-  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors","description":"MiniMax H3 FL2VA Pruned INT8 ConvRot","destination":"diffusion_models","download":true},
-  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors","description":"MiniMax H3 REF2VA Pruned INT8 ConvRot","destination":"diffusion_models","download":true},
+  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors","description":"MiniMax H3 FL2VA Pruned INT8 ConvRot (unused)","destination":"diffusion_models","download":false},
+  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/diffusion_models/minimax_h3_ref2va_pruned_fp8_scaled.safetensors","description":"MiniMax H3 REF2VA Pruned FP8 Scaled (production)","destination":"diffusion_models","download":true},
   {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors","description":"Qwen3VL 32B NVFP4 AWQ","destination":"text_encoders","download":true},
-  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors","description":"MiniMax H3 FL2V Turbo 4-Step","destination":"loras","download":true},
-  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors","description":"MiniMax H3 REF2V Turbo 4-Step","destination":"loras","download":true},
+  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_fl2v_turbo_4step_v1.0_768p_comfyui_bf16.safetensors","description":"MiniMax H3 FL2V Turbo 4-Step (rejected: plastic fabric)","destination":"loras","download":false},
+  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors","description":"MiniMax H3 REF2V Turbo 4-Step (rejected: plastic fabric)","destination":"loras","download":false},
   {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_audio_vae_fp32.safetensors","description":"MiniMax H3 Audio VAE FP32","destination":"vae","download":true},
-  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_fp16.safetensors","description":"MiniMax H3 Video VAE FP16","destination":"vae","download":true}
+  {"url":"https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main/vae/minimax_h3_video_vae_int8_convrot.safetensors","description":"MiniMax H3 Video VAE INT8 ConvRot","destination":"vae","download":true},
+  {"url":"https://huggingface.co/ByteDance/LatentSync-1.6/resolve/main/latentsync_unet.pt","description":"LatentSync 1.6 UNet (lip-sync inference, 4.7GB)","destination":"latentsync","download":true},
+  {"url":"https://huggingface.co/ByteDance/LatentSync-1.6/resolve/main/stable_syncnet.pt","description":"LatentSync 1.6 Stable SyncNet (1.5GB)","destination":"latentsync","download":true},
+  {"url":"https://huggingface.co/ByteDance/LatentSync-1.6/resolve/main/whisper/tiny.pt","description":"LatentSync Whisper tiny (audio encoder)","destination":"latentsync","download":true},
+  {"url":"https://huggingface.co/ByteDance/LatentSync-1.6/resolve/main/auxiliary/sfd_face.pth","description":"LatentSync face detector SFD (inference face crop)","destination":"latentsync","download":true}
 ]
