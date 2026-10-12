@@ -18,12 +18,14 @@ if [[ ! -f /.provisioning && -f "${COMFYUI_DIR}/requirements.txt" ]]; then
   uv pip --no-cache-dir install -r requirements.txt
 fi
 
+# Start control service + auth proxy on every start (idempotent).
+/opt/minimax-h3/scripts/h3_services.sh
+
 # Run H3 preparation from the service that is guaranteed to be loaded by the
-# Vast base image. Some base-image revisions silently skip extra supervisor
-# fragments. The marker prevents redownloading on autorestart.
-if [[ ! -f /workspace/.h3-prepared ]]; then
+# Vast base image. The manifest/version stamp prevents stale template model
+# names or a previous image's marker from skipping preparation.
+if ! /venv/main/bin/python /opt/minimax-h3/scripts/h3_control.py is-prepared; then
   /opt/minimax-h3/docker-entrypoint.sh
-  touch /workspace/.h3-prepared
 fi
 
 while [[ -f /.provisioning ]]; do

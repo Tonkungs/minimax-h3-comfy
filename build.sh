@@ -2,10 +2,11 @@
 set -Eeuo pipefail
 
 IMAGE_NAME="${IMAGE_NAME:-minimax-h3-comfy}"
-IMAGE_TAG="${IMAGE_TAG:-0.3.0}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VERSION_DEFAULT="$(< "${ROOT_DIR}/VERSION")"
+IMAGE_TAG="${IMAGE_TAG:-${VERSION_DEFAULT}}"
 CONTAINER_NAME="${CONTAINER_NAME:-minimax-h3-comfy}"
 IMAGE="${IMAGE_NAME}:${IMAGE_TAG}"
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 gpu_flags=(--env NVIDIA_VISIBLE_DEVICES=void)
 if [[ "${USE_GPU:-1}" == "1" ]]; then
   gpu_flags=(--gpus all)
@@ -52,6 +53,7 @@ case "${1:-}" in
   build)
     docker build --platform linux/amd64 \
       --build-arg "COMFY_SOURCE_IMAGE=${COMFY_SOURCE_IMAGE:-vastai/comfy:v0.36.0-cuda-13.2-py312}" \
+      --build-arg "H3_IMAGE_VERSION=${IMAGE_TAG}" \
       -t "$IMAGE" "$ROOT_DIR"
     ;;
   probe)

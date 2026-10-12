@@ -70,7 +70,13 @@ async def relay(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> N
         writer.close()
 
 
-async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.StreamWriter, target: tuple[str, int], expected: str) -> None:
+async def handle(
+    client_reader: asyncio.StreamReader,
+    client_writer: asyncio.StreamWriter,
+    target: tuple[str, int],
+    control_target: tuple[str, int],
+    expected: str,
+) -> None:
     try:
         header_bytes = await client_reader.readuntil(b"\r\n\r\n")
         header_text = header_bytes.decode("iso-8859-1")
@@ -91,7 +97,8 @@ async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.Str
             await set_auth_cookie(client_writer, path, token)
             return
 
-        upstream_reader, upstream_writer = await asyncio.open_connection(*target)
+        route_target = control_target if urlsplit(path).path.startswith("/h3/") else target
+        upstream_reader, upstream_writer = await asyncio.open_connection(*route_target)
         # Consume the token at the auth boundary. Forwarding it upstream is
         # unnecessary and causes redirect-based clients to lose authentication.
         upstream_path = path
@@ -116,9 +123,9 @@ async def handle(client_reader: asyncio.StreamReader, client_writer: asyncio.Str
             pass
 
 
-async def main(listen: int, target: int, expected: str) -> None:
+async def main(listen: int, target: int, control_target: int, expected: str) -> None:
     server = await asyncio.start_server(
-        lambda r, w: handle(r, w, ("127.0.0.1", target), expected),
+        lambda r, w: handle(r, w, ("127.0.0.1", target), ("127.0.0.1", control_target), expected),
         "0.0.0.0",
         listen,
     )
@@ -131,10 +138,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("listen", type=int)
     parser.add_argument("target", type=int)
+    parser.add_argument("control_target", type=int, nargs="?", default=18189)
     args = parser.parse_args()
     import os
 
     token = os.environ.get("CF_TOKEN") or os.environ.get("H3_AUTH_TOKEN", "")
     if not token:
         raise SystemExit("CF_TOKEN is required (H3_AUTH_TOKEN is accepted for legacy templates)")
-    asyncio.run(main(args.listen, args.target, token))
+    asyncio.run(main(args.listen, args.target, args.control_target, token))

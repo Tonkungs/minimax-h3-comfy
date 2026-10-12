@@ -21,7 +21,7 @@ cd minimax-h3-vast-image
 # For local build, the default `minimax-h3-comfy` is enough.
 # For Docker Hub, replace this with your lowercase Docker Hub namespace.
 export IMAGE_NAME=yourdockerhubuser/minimax-h3-comfy
-export IMAGE_TAG=0.2.0
+export IMAGE_TAG=1.4.0
 ./build.sh build
 ```
 
@@ -75,7 +75,6 @@ docker logs -f minimax-h3-comfy
 MODEL_PRESET=5090 ./build.sh run
 MODEL_PRESET=6000 ./build.sh run
 MODEL_PRESET=full ./build.sh run
-MODEL_FILES='qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors,minimax_h3_video_vae_fp16.safetensors' ./build.sh run
 ```
 
 Supported modes are `skip`, `probe`, `missing`, and `full`. Use `skip` for a
@@ -89,7 +88,7 @@ authenticated proxy ports 19111, 19080, 19384, 19188, and 19288. The proxy
 forwards to the actual service ports 11111, 18080, 18384, 18188, and 18288.
 The supplied
 `72299` value is omitted because Docker ports cannot exceed 65535.
-`COMFYUI_ARGS`, `PORTAL_CONFIG`, `MODEL_PRESET`, `MODEL_FILES`, and
+`COMFYUI_ARGS`, `PORTAL_CONFIG`, `MODEL_PRESET`, and
 `DOWNLOAD_MODE` can be overridden with environment variables.
 
 For a custom download list, set `MODEL_MANIFEST_JSON` to a JSON array of
@@ -113,6 +112,18 @@ Example URL override:
 MODEL_MANIFEST_URL=https://raw.githubusercontent.com/USER/REPO/main/model-manifest.json
 ```
 
+For H3 startup, the image derives selected filenames from its manifest and
+ignores any `MODEL_FILES` value (for example a stale one supplied by a Vast
+template); use `MODEL_PRESET` or a custom manifest to choose models. Presets
+`5090`, `6000` and `override` select only `diffusion_models`, `text_encoders`
+and `vae` entries, so LatentSync entries are skipped; `MODEL_PRESET=full`
+downloads them. Downloaded
+files are linked into
+`/opt/workspace-internal/ComfyUI/models/{diffusion_models,text_encoders,vae}`.
+ComfyUI starts after preparation and is restarted automatically if links are
+refreshed while it is already running. Official workflow copies default
+`CLIPLoader device=cpu` for the Qwen encoder.
+
 ## Cloudflare and CF_TOKEN authentication
 
 The container refuses to start unless `CF_TOKEN` is set. Every Cloudflare
@@ -135,6 +146,59 @@ curl https://your-tunnel.trycloudflare.com/api/... \
 Do not commit the token or put it in the image. Query-string tokens can appear
 temporarily in browser history or access logs; use the Authorization header
 for automation.
+
+## H3 readiness and self-test API
+
+The existing authenticated proxy also exposes these endpoints on the ComfyUI
+port (default `8188`). They are available while models are downloading, so a
+dispatcher can poll readiness using HTTP only:
+
+```bash
+curl http://INSTANCE/h3/status -H 'Authorization: Bearer YOUR_CF_TOKEN'
+curl -X POST http://INSTANCE/h3/selftest \
+  -H 'Authorization: Bearer YOUR_CF_TOKEN'
+```
+
+`GET /h3/status` returns `phase` (`booting`, `downloading`, `starting_comfy`,
+`ready`, or `error`; `last_error` persists through `booting`/`downloading` and clears on `starting_comfy`/`ready`), `image_version`, `comfyui_health`, `last_error`, `last_error_at` (ISO UTC), `attempts` (prepare
+starts), and a
+`files` array with `name`, `destination`, `expected_bytes`, and
+`downloaded_bytes`. Expected sizes come from selected manifest URLs; they are
+`null` when Hugging Face metadata is unreachable. Downloaded bytes include the
+current `.part` file. This release reports `image_version: "1.4.0"`, aligned
+with the GitHub Actions image tag and `VERSION` file.
+
+`POST /h3/selftest` starts one bundled-reference Ref2VA job (512x512, 3
+seconds, 4 steps) in the background and returns `202 {"started": true, "run_id": "...", "started_at": <epoch>}`, or
+`202 {"started": false, "running": true}` if one is already running. It only
+runs after status is `ready`, and first checks ComfyUI `/object_info` for the
+required nodes and inputs. Poll `GET /h3/status`: its `selftest` field holds
+`{run_id, ok, duration_s, has_audio, output_bytes, error, started_at, finished_at, running}` for
+the last run; match `run_id` to the 202 response (ffprobe checks duration and audio stream); generation can take
+several minutes depending on the host.
+
+## Cheap Hugging Face download probe
+
+For a cheap, plain Ubuntu probe instance with no H3 image or weights, set its
+Vast `onstart` command to this one-liner after publishing the script:
+
+```bash
+bash -lc 'command -v curl >/dev/null || (apt-get update -qq && apt-get install -y -qq curl ca-certificates) >/dev/null 2>&1; curl -fsSL https://raw.githubusercontent.com/Tonkungs/minimax-h3-comfy/main/scripts/h3_download_probe.sh -o /tmp/h3p.sh && bash /tmp/h3p.sh || echo "PROBE_RESULT bytes=0 seconds=0 mbps=0.00 blocked=1"'
+```
+
+This works only after the script has been merged to `main`.
+
+The script downloads only `minimax_h3_audio_vae_fp32.safetensors` with
+`curl -fsL`, for at most 60 seconds per attempt. If the first attempt gets zero
+bytes, it waits a randomized 60–90 seconds and retries once. Stdout contains
+exactly one line, suitable for the Vast logs API:
+
+```text
+PROBE_RESULT bytes=<n> seconds=<s> mbps=<x>
+```
+
+Two zero-byte attempts end with
+`PROBE_RESULT bytes=0 seconds=<s> mbps=0.00 blocked=1`.
 
 ## Official workflows
 
