@@ -21,7 +21,7 @@ cd minimax-h3-vast-image
 # For local build, the default `minimax-h3-comfy` is enough.
 # For Docker Hub, replace this with your lowercase Docker Hub namespace.
 export IMAGE_NAME=yourdockerhubuser/minimax-h3-comfy
-export IMAGE_TAG=1.4.0
+export IMAGE_TAG=1.5.0
 ./build.sh build
 ```
 
@@ -83,11 +83,20 @@ CPU-only UI smoke test without a Hugging Face token. Models are stored under
 
 ## Vast ports and defaults
 
-The image exposes host ports 1111, 8080, 8384, 8188, and 8288. They map to the
-authenticated proxy ports 19111, 19080, 19384, 19188, and 19288. The proxy
-forwards to the actual service ports 11111, 18080, 18384, 18188, and 18288.
+The image exposes host ports 1111, 8080, 8384, 8188, and 8288. Only 8188 is
+served on all interfaces (TLS). 1111/8080/8288/8384 are token-gated `auth_proxy`
+bridges on 127.0.0.1 forwarding to 11111/18080/18288/18384, used by the
+Cloudflare tunnels. The 19xxx ports in `PORTAL_CONFIG`/`EXPOSE` have no listener.
 The supplied
 `72299` value is omitted because Docker ports cannot exceed 65535.
+
+Port 8188 serves HTTPS with a self-signed certificate generated in the
+container at first start (the key stays in `/etc/h3-tls`, never in
+`/workspace`). Plain HTTP is accepted only from inside the container
+(loopback, used by the Cloudflare tunnel); any other plain request gets
+`400 Use HTTPS`. The tunnel bridges 1111/8080/8288/8384 now go through the same
+token proxy.
+
 `COMFYUI_ARGS`, `PORTAL_CONFIG`, `MODEL_PRESET`, and
 `DOWNLOAD_MODE` can be overridden with environment variables.
 
@@ -127,7 +136,8 @@ refreshed while it is already running. Official workflow copies default
 ## Cloudflare and CF_TOKEN authentication
 
 The container refuses to start unless `CF_TOKEN` is set. Every Cloudflare
-tunnel and published service port is protected by the same token. Open the
+tunnel (including the 1111/8080/8288/8384 bridges, which run `auth_proxy.py`)
+and published service port is protected by the same token. Open the
 ComfyUI tunnel with:
 
 ```text
@@ -135,7 +145,9 @@ https://your-tunnel.trycloudflare.com/?token=YOUR_CF_TOKEN
 ```
 
 The proxy exchanges the query token for an HttpOnly cookie and redirects to a
-clean URL. A missing or incorrect token returns `401 Unauthorized`. For API
+clean URL. A missing or incorrect token returns `401 Unauthorized`. The proxy
+strips its own token (Authorization bearer / `h3_auth` cookie) before forwarding
+upstream. For API
 calls, prefer a header:
 
 ```bash
@@ -151,11 +163,12 @@ for automation.
 
 The existing authenticated proxy also exposes these endpoints on the ComfyUI
 port (default `8188`). They are available while models are downloading, so a
-dispatcher can poll readiness using HTTP only:
+dispatcher can poll readiness over HTTPS (`-k` is for manual testing only; automation
+must pin the certificate via the proof below):
 
 ```bash
-curl http://INSTANCE/h3/status -H 'Authorization: Bearer YOUR_CF_TOKEN'
-curl -X POST http://INSTANCE/h3/selftest \
+curl -k https://INSTANCE/h3/status -H 'Authorization: Bearer YOUR_CF_TOKEN'
+curl -k -X POST https://INSTANCE/h3/selftest \
   -H 'Authorization: Bearer YOUR_CF_TOKEN'
 ```
 
@@ -165,7 +178,7 @@ starts), and a
 `files` array with `name`, `destination`, `expected_bytes`, and
 `downloaded_bytes`. Expected sizes come from selected manifest URLs; they are
 `null` when Hugging Face metadata is unreachable. Downloaded bytes include the
-current `.part` file. This release reports `image_version: "1.4.0"`, aligned
+current `.part` file. This release reports `image_version: "1.5.0"`, aligned
 with the GitHub Actions image tag and `VERSION` file.
 
 `POST /h3/selftest` starts one bundled-reference Ref2VA job (512x512, 3
@@ -176,6 +189,24 @@ required nodes and inputs. Poll `GET /h3/status`: its `selftest` field holds
 `{run_id, ok, duration_s, has_audio, output_bytes, error, started_at, finished_at, running}` for
 the last run; match `run_id` to the 202 response (ffprobe checks duration and audio stream); generation can take
 several minutes depending on the host.
+
+### TLS proof (cert pinning)
+
+```text
+GET https://INSTANCE/h3/tls-proof        (no token)
+200 {"scheme":"h3-tls-v1","cert_sha256":"<hex>","proof":"<hex>"}
+proof = lowercase hex(HMAC-SHA256(key = UTF-8 bytes of CF_TOKEN,
+        msg = "h3-tls-v1:" + lowercase hex SHA-256 of the leaf certificate DER))
+```
+
+- The client hashes the DER certificate it received in the TLS handshake
+  itself (it does not trust `cert_sha256`), compares in constant time, sends
+  no token before the proof matches, then pins that SHA-256 for every later call.
+- A new container has a new certificate: re-run the proof on pin failure and
+  never fall back to http. The certificate is reused across restarts of the
+  same container.
+- Because the proof is token-free, `CF_TOKEN` must be long and random (it
+  allows offline guessing of weak tokens).
 
 ## Cheap Hugging Face download probe
 

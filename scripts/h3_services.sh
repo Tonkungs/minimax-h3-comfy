@@ -48,6 +48,6 @@ for _ in $(seq 1 30); do
   sleep 1
 done
 if ! (echo >/dev/tcp/127.0.0.1/8188) >/dev/null 2>&1; then
-  echo "[h3][error] authenticated HTTP proxy did not start" >&2
+  echo "[h3][error] authenticated TLS proxy did not start" >&2
   exit 1
 fi

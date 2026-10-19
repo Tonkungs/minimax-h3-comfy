@@ -2,7 +2,7 @@ FROM vastai/comfy:v0.36.0-cuda-13.2-py312
 
 USER root
 
-ARG H3_IMAGE_VERSION=1.4.0
+ARG H3_IMAGE_VERSION=1.5.0
 
 ENV MODEL_ROOT=/workspace/models \
     MODEL_PRESET=5090 \
@@ -34,7 +34,8 @@ RUN chmod +x /opt/minimax-h3/docker-entrypoint.sh \
     && mkdir -p /opt/minimax-h3/assets \
     && "$H3_PYTHON" /opt/minimax-h3/scripts/create_selftest_reference.py \
       /opt/minimax-h3/assets/selftest-reference.png \
-    && command -v ffprobe >/dev/null
+    && command -v ffprobe >/dev/null \
+    && command -v openssl >/dev/null
 
 LABEL org.opencontainers.image.version="${H3_IMAGE_VERSION}" \
       org.opencontainers.image.title="MiniMax H3 ComfyUI for Vast.ai"

@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -133,4 +134,149 @@ line = re.compile(r"^PROBE_RESULT bytes=\d+ seconds=[\d.]+ mbps=[\d.]+( blocked=
 assert line.match("PROBE_RESULT bytes=100 seconds=1.5 mbps=0.53")
 assert line.match("PROBE_RESULT bytes=0 seconds=60 mbps=0.00 blocked=1")
 assert "PROBE_RESULT bytes=%s seconds=%s mbps=%s" in probe and "blocked=1" in probe
+# --- TLS proxy ---
+import asyncio
+import hashlib
+import hmac
+import http.client
+import json
+import socket
+import ssl
+import threading
+
+import auth_proxy  # noqa: E402
+
+der = b"abc"
+t = auth_proxy.tls_proof("t0k3n", der)
+assert t["cert_sha256"] == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+assert t["cert_sha256"] == hashlib.sha256(der).hexdigest()
+assert t["proof"] == hmac.new(b"t0k3n", b"h3-tls-v1:" + t["cert_sha256"].encode(), hashlib.sha256).hexdigest()
+assert re.fullmatch(r"[0-9a-f]{64}", t["proof"]) and t["scheme"] == "h3-tls-v1"
+assert auth_proxy.tls_proof("other", der)["proof"] != t["proof"]
+
+for h in ("127.0.0.1", "127.1.2.3", "::1", "::ffff:127.0.0.1"):
+    assert auth_proxy.plain_allowed(h), h
+for h in ("10.0.0.1", "172.17.0.1", "::ffff:8.8.8.8", "", "nonsense"):
+    assert not auth_proxy.plain_allowed(h), h
+assert auth_proxy.PLAIN_REJECT.startswith(b"HTTP/1.1 400 Bad Request") and auth_proxy.PLAIN_REJECT.endswith(b"Use HTTPS\n")
+body_len = len(auth_proxy.PLAIN_REJECT.split(b"\r\n\r\n", 1)[1])
+assert f"Content-Length: {body_len}".encode() in auth_proxy.PLAIN_REJECT
+
+tls_tmp = Path(tempfile.mkdtemp())
+cert_p, key_p = auth_proxy.ensure_cert(tls_tmp / "tls")
+assert cert_p.stat().st_size and key_p.stat().st_size and (key_p.stat().st_mode & 0o777) == 0o600
+first_pem = cert_p.read_bytes()
+assert auth_proxy.ensure_cert(tls_tmp / "tls") == (cert_p, key_p) and cert_p.read_bytes() == first_pem
+assert not [p for p in tls_tmp.iterdir() if p.name.startswith(".h3-tls-")]
+
+
+def free_port():
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+seen_requests = []
+
+
+async def fake_upstream(port, text):
+    async def h(r, w):
+        seen_requests.append((await r.readuntil(b"\r\n\r\n")).decode("iso-8859-1"))
+        w.write(f"HTTP/1.1 200 OK\r\nContent-Length: {len(text)}\r\nConnection: close\r\n\r\n{text}".encode())
+        await w.drain()
+        w.close()
+    return await asyncio.start_server(h, "127.0.0.1", port)
+
+
+async def tls_main(ports, ready):
+    stop = loop_box["stop"] = asyncio.Event()
+    ups = [await fake_upstream(ports["u"], "upstream-ok"), await fake_upstream(ports["c"], "control-ok")]
+    ctx, cder = auth_proxy.make_ctx(cert_p, key_p)
+    loop_box["ctx"] = ctx
+    task = asyncio.create_task(auth_proxy.serve("127.0.0.1", ports["p"], ports["u"], ports["c"], "selfcheck-token", ctx, cder, ready))
+    await stop.wait()
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
+    await asyncio.sleep(0.05)
+    for u in ups:
+        u.close()
+
+
+if ssl.OPENSSL_VERSION.startswith("LibreSSL 2."):
+    print("selfcheck: live TLS test skipped (python ssl is", ssl.OPENSSL_VERSION + "; cannot serve ECDSA certs)")
+else:
+    ports = {k: free_port() for k in "ucp"}
+    ready, loop_box = threading.Event(), {}
+
+
+    def run_proxy():
+        loop = asyncio.new_event_loop()
+        loop_box["loop"] = loop
+        loop.run_until_complete(tls_main(ports, ready))
+        loop.close()
+
+
+    th = threading.Thread(target=run_proxy, daemon=True)
+    th.start()
+    assert ready.wait(5)
+    time.sleep(0.2)
+    cctx = ssl.create_default_context()
+    cctx.check_hostname, cctx.verify_mode = False, ssl.CERT_NONE
+
+
+    def tls_get(path, headers=None):
+        c = http.client.HTTPSConnection("127.0.0.1", ports["p"], context=cctx, timeout=5)
+        c.connect()
+        ver, peer = c.sock.version(), c.sock.getpeercert(binary_form=True)
+        c.request("GET", path, headers=headers or {})
+        r = c.getresponse()
+        out = (r.status, r.read(), r.getheader("Set-Cookie"), ver, peer)
+        c.close()
+        return out
+
+
+    auth = {"Authorization": "Bearer selfcheck-token"}
+    st, body, _, ver, peer = tls_get("/h3/tls-proof")
+    assert st == 200 and json.loads(body) == auth_proxy.tls_proof("selfcheck-token", peer)
+    assert peer == ssl.PEM_cert_to_DER_cert(cert_p.read_text())
+    assert ver in ("TLSv1.2", "TLSv1.3")
+    assert tls_get("/")[0] == 401
+    st, body, _, _, _ = tls_get("/", auth)
+    assert st == 200 and b"upstream-ok" in body
+    st, body, _, _, _ = tls_get("/h3/status", auth)
+    assert st == 200 and b"control-ok" in body
+    st, _, cookie, _, _ = tls_get("/?token=selfcheck-token")
+    assert st == 302 and "Secure" in cookie
+    pc = http.client.HTTPConnection("127.0.0.1", ports["p"], timeout=5)
+    pc.request("GET", "/", headers=auth)
+    pr = pc.getresponse()
+    assert pr.status == 200 and b"upstream-ok" in pr.read()
+    pc.close()
+    # websocket upgrade kept; proxy credentials stripped, other cookies kept
+    seen_requests.clear()
+    wc = ssl.create_default_context()
+    wc.check_hostname, wc.verify_mode = False, ssl.CERT_NONE
+    with socket.create_connection(("127.0.0.1", ports["p"]), timeout=5) as raw, wc.wrap_socket(raw) as ws:
+        ws.sendall(b"GET /?token=selfcheck-token&x=1 HTTP/1.1\r\nHost: x\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+                   b"Authorization: Bearer selfcheck-token\r\nCookie: a=1; h3_auth=selfcheck-token\r\n\r\n")
+        ws.recv(200)
+    got = seen_requests[-1]
+    assert "Connection: Upgrade" in got and "authorization" not in got.lower(), got
+    assert "h3_auth" not in got and "a=1" in got, got
+    assert got.startswith("GET /?x=1 ") and "token=" not in got, got  # query token never forwarded
+
+    # plain request from a non-loopback peer is rejected live
+    seen_requests.clear()
+    a, b = socket.socketpair()
+    b.settimeout(5)
+    asyncio.run_coroutine_threadsafe(auth_proxy.serve_conn(
+        a, "10.0.0.1", loop_box["ctx"], ("127.0.0.1", ports["u"]), ("127.0.0.1", ports["c"]),
+        "selfcheck-token", b"{}"), loop_box["loop"])
+    b.sendall(b"GET / HTTP/1.1\r\nAuthorization: Bearer selfcheck-token\r\n\r\n")
+    assert b.recv(200) == auth_proxy.PLAIN_REJECT
+    b.close()
+    assert not seen_requests
+    loop_box["loop"].call_soon_threadsafe(loop_box["stop"].set)
+    th.join(5)
+
 print("selfcheck ok")
