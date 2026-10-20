@@ -21,7 +21,7 @@ cd minimax-h3-vast-image
 # For local build, the default `minimax-h3-comfy` is enough.
 # For Docker Hub, replace this with your lowercase Docker Hub namespace.
 export IMAGE_NAME=yourdockerhubuser/minimax-h3-comfy
-export IMAGE_TAG=1.6.0
+export IMAGE_TAG=1.7.0
 ./build.sh build
 ```
 
@@ -178,7 +178,7 @@ starts), and a
 `files` array with `name`, `destination`, `expected_bytes`, and
 `downloaded_bytes`. Expected sizes come from selected manifest URLs; they are
 `null` when Hugging Face metadata is unreachable. Downloaded bytes include the
-current `.part` file. This release reports `image_version: "1.6.0"`, aligned
+current `.part` file. This release reports `image_version: "1.7.0"`, aligned
 with the GitHub Actions image tag and `VERSION` file.
 
 `POST /h3/selftest` starts one bundled-reference Ref2VA job (512x512, 3
@@ -285,3 +285,15 @@ ComfyUI port in `COMFYUI_ARGS`, set the matching value too:
 
 Review the MiniMax H3 community license and the terms of every model/adaptor
 before commercial use: https://huggingface.co/Comfy-Org/MiniMax-H3
+
+## Fast video save (image 1.7.0)
+
+ComfyUI's `SaveVideo` (PyAV libx264) took 34-52 s for a 10-15 s 1080x1920 clip
+on an RTX 5090. The `H3FastVideoSave` node (`custom_node/fast_save.py`,
+category "MiniMax H3") pipes frames to the system `ffmpeg` instead: NVENC
+(`h264_nvenc`) when a one-time probe succeeds, else `libx264 -preset veryfast`.
+Inputs: `images`, `fps`, `filename_prefix`, `encoder` (`auto`/`nvenc`/`x264`),
+`crf`, optional `audio`. A forced `nvenc` that fails is retried once with x264.
+Output is `<prefix>_00001_.mp4` in the output dir, reported like `SaveVideo`.
+The image sets `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` (needed for
+NVENC in the container) and checks `ffmpeg` at build time.

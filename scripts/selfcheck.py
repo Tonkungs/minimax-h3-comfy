@@ -194,6 +194,39 @@ finally:
 m = re.search(r"^ARG H3_IMAGE_VERSION=(\S+)", (ROOT / "Dockerfile").read_text(), re.M)
 assert m and m.group(1) == (ROOT / "VERSION").read_text().strip()
 
+# --- H3FastVideoSave (pure parts only; no torch/comfy needed) ---
+sys.path.insert(0, str(ROOT))
+import importlib  # noqa: E402
+cn = importlib.import_module("custom_node")
+fs = importlib.import_module("custom_node.fast_save")
+assert 'custom_node/fast_save.py" "${AUTOLOAD_DIR}/fast_save.py"' in open("docker-entrypoint.sh").read(), "entrypoint must install fast_save.py next to __init__.py"
+assert set(cn.NODE_CLASS_MAPPINGS) == {"H3FastVideoSave"} and cn.WEB_DIRECTORY == "./web"
+node = cn.NODE_CLASS_MAPPINGS["H3FastVideoSave"]
+it = node.INPUT_TYPES()
+assert list(it["required"]) == ["images", "fps", "filename_prefix", "encoder", "crf"], it
+assert it["required"]["images"] == ("IMAGE",) and it["required"]["fps"][0] == "FLOAT"
+assert it["required"]["encoder"][0] == ["auto", "nvenc", "x264"] and it["required"]["crf"][1]["default"] == 18
+assert it["required"]["filename_prefix"][1]["default"] == "MiniMax_H3" and list(it["optional"]) == ["audio"]
+assert node.OUTPUT_NODE is True and node.RETURN_TYPES == () and node.CATEGORY == "MiniMax H3"
+nv = fs.ffmpeg_args("nvenc", 1080, 1920, 24.0, 18, "/t/a.wav", "/t/o.mp4", 240)
+for tok in ("h264_nvenc", "p5", "hq", "vbr", "+faststart", "/t/a.wav", "-t"):
+    assert tok in nv, tok
+assert "libx264" not in nv and nv[nv.index("-t") + 1] == "10.000000" and nv[-1] == "/t/o.mp4"
+assert "-cq" in nv and nv[nv.index("-cq") + 1] == "19" and nv[nv.index("-b:v") + 1] == "0"
+x = fs.ffmpeg_args("x264", 1081, 1921, 24.0, 20, None, "/t/o.mp4", 240)
+assert "libx264" in x and "veryfast" in x and x[x.index("-crf") + 1] == "20" and "h264_nvenc" not in x
+assert "-t" not in x and "-c:a" not in x and x.count("-i") == 1 and "+faststart" in x
+assert any(a.startswith("pad=ceil(iw/2)*2") for a in x)
+
+# version agreement
+ver = (ROOT / "VERSION").read_text().strip()
+assert ver == "1.7.0", ver
+assert f"IMAGE_TAG: {ver}" in (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text()
+df = (ROOT / "Dockerfile").read_text()
+caps = re.search(r"NVIDIA_DRIVER_CAPABILITIES=(\S+)", df)
+assert caps and "video" in caps.group(1).split(","), caps
+assert "command -v ffmpeg" in df
+
 # set_qwen_cpu_default: top-level and subgraph CLIPLoader
 wf = {
     "nodes": [{"type": "CLIPLoader", "widgets_values": ["a", "minimax", "default"]}],

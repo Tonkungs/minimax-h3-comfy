@@ -87,6 +87,7 @@ stage "$PYTHON_BIN" "${PROJECT_ROOT}/scripts/fetch_workflows.py"
 AUTOLOAD_DIR="${COMFYUI_DIR}/custom_nodes/minimax_h3_autoload"
 mkdir -p "${AUTOLOAD_DIR}/web"
 cp -f "${PROJECT_ROOT}/custom_node/__init__.py" "${AUTOLOAD_DIR}/__init__.py"
+cp -f "${PROJECT_ROOT}/custom_node/fast_save.py" "${AUTOLOAD_DIR}/fast_save.py"
 cp -f "${PROJECT_ROOT}/custom_node/web/minimax_h3_autoload.js" "${AUTOLOAD_DIR}/web/minimax_h3_autoload.js"
 if [[ -s /workspace/workflows/video_minimax_h3_i2v.json ]]; then
   cp -f /workspace/workflows/video_minimax_h3_i2v.json "${AUTOLOAD_DIR}/web/video_minimax_h3_i2v.json"

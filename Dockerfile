@@ -2,12 +2,13 @@ FROM vastai/comfy:v0.36.0-cuda-13.2-py312
 
 USER root
 
-ARG H3_IMAGE_VERSION=1.6.0
+ARG H3_IMAGE_VERSION=1.7.0
 
 ENV MODEL_ROOT=/workspace/models \
     MODEL_PRESET=5090 \
     DOWNLOAD_MODE=missing \
     MODEL_PROBE_BYTES=1048576 \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility,video \
     H3_IMAGE_VERSION=${H3_IMAGE_VERSION} \
     H3_PROJECT_ROOT=/opt/minimax-h3 \
     H3_PYTHON=/venv/main/bin/python \
@@ -44,6 +45,7 @@ RUN chmod +x /opt/minimax-h3/docker-entrypoint.sh \
     && "$H3_PYTHON" /opt/minimax-h3/scripts/create_selftest_reference.py \
       /opt/minimax-h3/assets/selftest-reference.png \
     && command -v ffprobe >/dev/null \
+    && command -v ffmpeg >/dev/null \
     && command -v openssl >/dev/null
 
 LABEL org.opencontainers.image.version="${H3_IMAGE_VERSION}" \
