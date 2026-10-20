@@ -39,6 +39,22 @@ if IMAGE_VERSION == "unknown":
             continue
 COMFY_URL = os.environ.get("COMFYUI_API_BASE", "http://127.0.0.1:18188").rstrip("/")
 MODEL_DESTINATIONS = {"diffusion_models", "text_encoders", "vae"}
+# Recipe files come only from the server-side table below, never from the manifest preset filter.
+RECIPE_DESTINATIONS = {"loras", "latent_upscale_models"}
+PREPARE_LOCK_PATH = Path(os.environ.get("H3_PREPARE_LOCK", "/workspace/.h3-prepare.lock"))
+_LBH = "https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler/resolve/3f941d5d182014dd5c0a5e16330420ee2d4aa0c6/minimax_h3_latent_upscaler_3d_conv_v1/"
+_SMD = "https://huggingface.co/zjwfufu/SMD-MiniMax-H3-Ref2VA-%s-ComfyUI/resolve/%s/SMD-MiniMax-H3-Ref2VA-%s.safetensors"
+UPSCALER_FILE = ("latent_upscale_models", _LBH + "minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors")
+RECIPES: dict[str, list[tuple[str, str]]] = {
+    "base": [],
+    "smd8": [("loras", _SMD % ("8step", "fc5f640d0db854cccdcad3b1cdb375458bfaaef4", "8step"))],
+    "smd4vsa": [
+        ("loras", _SMD % ("4step", "4f38e9eca79e7e3364fa02a9884c90d4317b6966", "4step")),
+        ("loras", "https://huggingface.co/barelymining/ComfyUI-MiniMax-H3-FastVideo/resolve/aa554050fe27ec3c62e20e57519beb46741c9000/fasth3_vsa_gate.safetensors"),
+    ],
+}
+PREPARE = {"recipe": None, "running": False, "ok": None, "error": None, "started_at": None, "finished_at": None}
+PREPARE_GUARD = threading.Lock()
 STATUS_CACHE: dict[str, tuple[float, int | None]] = {}
 STATUS_CACHE_LOCK = threading.Lock()
 SELFTEST_LOCK = threading.Lock()
@@ -71,6 +87,44 @@ def item_name(item: dict) -> str:
     from urllib.parse import unquote
 
     return unquote(urlsplit(str(item.get("url") or item.get("path") or "")).path.rstrip("/").split("/")[-1])
+
+
+def boot_recipe() -> tuple[str, str | None]:
+    """(recipe, rejected raw value). Absent or unknown H3_RECIPE falls back to base."""
+    raw = os.environ.get("H3_RECIPE", "").strip()
+    if raw in RECIPES:
+        return raw, None
+    return "base", raw[:64] or None
+
+
+def recipe_items(recipe: str) -> list[dict]:
+    from urllib.parse import unquote
+
+    return [
+        {"name": unquote(urlsplit(url).path.rsplit("/", 1)[-1]), "destination": destination, "url": url}
+        for destination, url in [UPSCALER_FILE, *RECIPES[recipe]]
+    ]
+
+
+def boot_items() -> list[dict]:
+    return selected_items() + recipe_items(boot_recipe()[0])
+
+
+def prepare_snapshot() -> dict:
+    with PREPARE_GUARD:
+        return dict(PREPARE)
+
+
+def status_items() -> list[dict]:
+    items = boot_items()
+    prep = prepare_snapshot()
+    if prep["running"] and prep["recipe"] in RECIPES:
+        items += [i for i in recipe_items(prep["recipe"]) if i not in items]
+    return items
+
+
+def recipe_ready(recipe: str) -> bool:
+    return all((MODEL_ROOT / i["destination"] / i["name"]).is_file() for i in recipe_items(recipe))
 
 
 def selected_items() -> list[dict]:
@@ -120,10 +174,11 @@ def selected_items() -> list[dict]:
 def manifest_signature() -> str:
     payload = {
         "version": IMAGE_VERSION,
+        "recipe": boot_recipe()[0],
         "mode": os.environ.get("DOWNLOAD_MODE", "missing"),
         "models": [
             {"name": item["name"], "destination": item["destination"], "url": item["url"]}
-            for item in selected_items()
+            for item in boot_items()
         ],
     }
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
@@ -185,27 +240,17 @@ def expected_bytes(item: dict) -> int | None:
         if cached and cached[0] > now:
             return cached[1]
 
-    def fetch_size(entry: dict) -> int | None:
-        headers = {"Accept": "application/json"}
-        request = urllib.request.Request(entry["url"], method="HEAD", headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=4) as response:
-                value = response.headers.get("Content-Length") or response.headers.get("X-Linked-Size")
-                size = int(value) if value and value.isdigit() else None
-                return size if size and size > 0 else None
-        except (OSError, urllib.error.URLError, ValueError):
-            return None
-
-    # Run metadata HEAD requests concurrently so a temporarily blocked host
-    # cannot make the status endpoint wait once per model file.
-    items = selected_items()
-    with ThreadPoolExecutor(max_workers=max(1, min(8, len(items)))) as pool:
-        values = list(pool.map(fetch_size, items))
-    for entry, size in zip(items, values):
-        with STATUS_CACHE_LOCK:
-            STATUS_CACHE[entry["url"]] = (time.monotonic() + (3600 if size else 60), size)
+    request = urllib.request.Request(item["url"], method="HEAD", headers={"Accept": "application/json"})
+    size = None
+    try:
+        with urllib.request.urlopen(request, timeout=4) as response:
+            value = response.headers.get("Content-Length") or response.headers.get("X-Linked-Size")
+            size = int(value) if value and value.isdigit() and int(value) > 0 else None
+    except (OSError, urllib.error.URLError, ValueError):
+        pass
     with STATUS_CACHE_LOCK:
-        return STATUS_CACHE.get(cache_key, (0, None))[1]
+        STATUS_CACHE[cache_key] = (time.monotonic() + (3600 if size else 60), size)
+    return size
 
 
 def downloaded_bytes(item: dict) -> int:
@@ -220,11 +265,11 @@ def downloaded_bytes(item: dict) -> int:
     return total
 
 
-def link_models() -> tuple[bool, list[str]]:
+def link_models(items: list[dict] | None = None) -> tuple[bool, list[str]]:
     changed = False
     missing = []
-    for item in selected_items():
-        if item["destination"] not in MODEL_DESTINATIONS:
+    for item in boot_items() if items is None else items:
+        if item["destination"] not in MODEL_DESTINATIONS | RECIPE_DESTINATIONS:
             continue
         source = MODEL_ROOT / item["destination"] / item["name"]
         target = COMFYUI_DIR / "models" / item["destination"] / item["name"]
@@ -259,14 +304,16 @@ def comfyui_health() -> bool:
 
 def status_payload() -> dict:
     state = load_state()
-    items = selected_items()
+    items = status_items()
     health = comfyui_health()
     phase = state.get("phase", "booting")
     if phase != "error":
         phase = "ready" if state.get("prepared") and health else "starting_comfy" if phase == "ready" else phase
     files = []
-    for item in items:
-        expected = expected_bytes(item)
+    # Concurrent HEADs so a blocked host cannot stall the endpoint once per file.
+    with ThreadPoolExecutor(max_workers=max(1, min(8, len(items)))) as pool:
+        sizes = list(pool.map(expected_bytes, items))
+    for item, expected in zip(items, sizes):
         downloaded = downloaded_bytes(item)
         files.append({
             "name": item["name"],
@@ -274,9 +321,14 @@ def status_payload() -> dict:
             "expected_bytes": expected,
             "downloaded_bytes": downloaded,
         })
+    recipe, fallback = boot_recipe()
     return {
         "phase": phase,
         "image_version": IMAGE_VERSION,
+        "recipe": recipe,
+        "recipe_fallback": fallback,
+        "recipes_ready": [r for r in RECIPES if recipe_ready(r)],
+        "prepare": prepare_snapshot(),
         "comfyui_health": health,
         "last_error": state.get("last_error"),
         "last_error_at": state.get("last_error_at"),
@@ -284,6 +336,41 @@ def status_payload() -> dict:
         "selftest": {**(state.get("selftest") or {}), "running": SELFTEST_LOCK.locked()},
         "files": files,
     }
+
+
+def prepare_job(recipe: str) -> None:
+    ok, error = False, None
+    try:
+        with open(PREPARE_LOCK_PATH, "w") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)  # same lock as boot
+            import download_models  # lazy: needs huggingface_hub
+
+            download_models.fetch_extra(recipe_items(recipe), MODEL_ROOT)
+            link_models(recipe_items(recipe))
+        ok = True
+    except BaseException as exc:  # download_models.fail() raises SystemExit
+        error = (getattr(exc, "h3_message", None) or str(exc))[:500] or type(exc).__name__
+    finally:
+        with PREPARE_GUARD:
+            PREPARE.update(running=False, ok=ok, error=error, finished_at=time.time())
+
+
+def start_prepare(recipe: str) -> bool:
+    with PREPARE_GUARD:
+        if PREPARE["running"]:
+            return False
+        PREPARE.update(recipe=recipe, running=True, ok=None, error=None, started_at=time.time(), finished_at=None)
+    threading.Thread(target=prepare_job, args=(recipe,), daemon=True).start()
+    return True
+
+
+def parse_prepare_request(body: bytes) -> str | None:
+    """Recipe name from a request body, or None when invalid (never a raw filename)."""
+    try:
+        recipe = json.loads(body.decode("utf-8")).get("recipe")
+    except (ValueError, AttributeError):
+        return None
+    return recipe if isinstance(recipe, str) and recipe in RECIPES else None
 
 
 def comfy_request(path: str, data: bytes | None = None, content_type: str | None = None) -> dict:
@@ -541,15 +628,30 @@ class Handler(BaseHTTPRequestHandler):
                 "attempts": 0,
                 "selftest": {"running": SELFTEST_LOCK.locked()},
                 "files": [],
+                "recipe": boot_recipe()[0],
+                "recipe_fallback": boot_recipe()[1],
+                "recipes_ready": [],
+                "prepare": prepare_snapshot(),
             })
 
     def do_POST(self) -> None:
-        if self.path.split("?", 1)[0] != "/h3/selftest":
+        route = self.path.split("?", 1)[0]
+        if route not in {"/h3/selftest", "/h3/prepare"}:
             self.send_json(404, {"error": "not found"})
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
-        if length:
-            self.rfile.read(min(length, 65536))
+        body = self.rfile.read(min(length, 65536)) if length else b""
+        if route == "/h3/prepare":
+            recipe = parse_prepare_request(body)
+            if os.environ.get("DOWNLOAD_MODE", "missing").strip().lower() in {"skip", "probe"}:
+                self.send_json(409, {"error": "downloads disabled"})
+            elif recipe is None:
+                self.send_json(400, {"error": "unknown recipe"})
+            elif start_prepare(recipe):
+                self.send_json(202, {"started": True, "recipe": recipe})
+            else:
+                self.send_json(202, {"started": False, "running": True})
+            return
         started = start_selftest()
         if started:
             self.send_json(202, {"started": True, **started})

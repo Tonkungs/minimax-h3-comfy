@@ -2,7 +2,7 @@ FROM vastai/comfy:v0.36.0-cuda-13.2-py312
 
 USER root
 
-ARG H3_IMAGE_VERSION=1.5.0
+ARG H3_IMAGE_VERSION=1.6.0
 
 ENV MODEL_ROOT=/workspace/models \
     MODEL_PRESET=5090 \
@@ -24,6 +24,15 @@ COPY VERSION /opt/minimax-h3/VERSION
 COPY workflows /opt/minimax-h3/workflows
 COPY custom_node /opt/minimax-h3/custom_node
 COPY docker-entrypoint.sh /opt/minimax-h3/docker-entrypoint.sh
+
+# Custom nodes pinned to reviewed commits; their requirements are not installed
+# (comfy-kitchen and einops already ship in the base image).
+RUN set -Eeuo pipefail \
+    && cd "$COMFYUI_DIR/custom_nodes" \
+    && git clone https://github.com/Kablex/ComfyUI-Ref2VA-VSA \
+    && git -C ComfyUI-Ref2VA-VSA checkout 323a0a5f7c636cc70f95464145732f81f04a72e9 \
+    && git clone https://github.com/LBH-123-AI/Comfyui_Minimax_h3_latent_Upscaler \
+    && git -C Comfyui_Minimax_h3_latent_Upscaler checkout 40316cf008b2fd8663263270669eb4da23f89d2c
 
 RUN chmod +x /opt/minimax-h3/docker-entrypoint.sh \
     /opt/minimax-h3/scripts/*.py \

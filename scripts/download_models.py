@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import sys
@@ -14,6 +15,8 @@ from urllib.request import Request, urlopen
 
 from huggingface_hub import HfApi, hf_hub_url
 
+from h3_control import boot_recipe, recipe_items
+
 
 PROJECT_ROOT = Path(os.environ.get("H3_PROJECT_ROOT", "/opt/minimax-h3"))
 DEFAULT_MANIFEST_PATH = PROJECT_ROOT / "config" / "model-manifest.json"
@@ -23,7 +26,9 @@ REVISION = "main"
 
 def fail(message: str) -> "NoReturn":
     print(f"[h3][error] {message}", file=sys.stderr)
-    raise SystemExit(1)
+    exc = SystemExit(1)
+    exc.h3_message = message
+    raise exc
 
 
 def load_manifest() -> dict:
@@ -153,56 +158,139 @@ def probe(item: dict, root: Path, byte_count: int) -> None:
         fail(f"probe failed for {item['name']}: {exc}")
 
 
-def download(item: dict, root: Path, index: int, count: int, batch_total: int, batch_done: int, batch_started: float) -> int:
+def download(item: dict, root: Path, index: int, count: int, batch_total: int, batch_done: int, batch_started: float, expected_size: int) -> int:
     destination = root / item["destination"] / item["name"]
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() and destination.stat().st_size == expected_size:
+        size = destination.stat().st_size
+        print(f"[h3][skip-verified] {item['name']} already complete ({size / (1024**3):.2f} GB)", flush=True)
+        return size
     if destination.exists() and destination.stat().st_size > 0 and not item.get("direct_url"):
         size = destination.stat().st_size
         print(f"[h3][skip] {item['name']} already exists ({size / (1024**3):.2f} GB)", flush=True)
         return size
 
     url = item["url"] if item.get("direct_url") else hf_hub_url(REPO_ID, item["path"], revision=REVISION)
-    request = Request(url, headers=auth_headers())
     temporary = destination.with_suffix(destination.suffix + ".part")
     try:
-        with urlopen(request, timeout=120) as response, temporary.open("wb") as output:
-            total = int(response.headers.get("Content-Length", "0") or 0)
-            downloaded = 0
-            next_report = 0
-            print(
-                f"[h3][download-start] {item['name']}"
-                + (f" ({total / (1024**3):.2f} GB)" if total else ""),
-                flush=True,
-            )
-            while chunk := response.read(8 * 1024 * 1024):
-                output.write(chunk)
-                downloaded += len(chunk)
-                if downloaded >= next_report:
-                    current_percent = downloaded / total * 100 if total else 0
-                    elapsed = time.monotonic() - batch_started
-                    overall = (batch_done + downloaded) / batch_total * 100 if batch_total else 100
-                    speed = (batch_done + downloaded) / elapsed if elapsed > 0 else 0
-                    eta = (batch_total - batch_done - downloaded) / speed if speed > 0 else 0
+        total = expected_size
+        if total <= 0:
+            fail(f"invalid expected size for {item['name']}: {total}")
+
+        def read_range(start: int, end: int) -> bytes:
+            request = Request(url, headers={**auth_headers(), "Range": f"bytes={start}-{end}"})
+            with urlopen(request, timeout=120) as response:
+                content_range = response.headers.get("Content-Range", "")
+                expected_range = f"bytes {start}-{end}/{total}"
+                if response.status != 206 or content_range != expected_range:
+                    raise OSError(
+                        f"unexpected range response for {item['name']}: "
+                        f"status={response.status}, content-range={content_range!r}"
+                    )
+                data = response.read(end - start + 1)
+                if len(data) != end - start + 1:
+                    raise OSError(
+                        f"short range for {item['name']}: got {len(data)} bytes, "
+                        f"expected {end - start + 1}"
+                    )
+                return data
+
+        def read_retry(start: int, end: int) -> bytes:
+            last_error: Exception | None = None
+            for attempt in range(1, 4):
+                try:
+                    return read_range(start, end)
+                except (HTTPError, URLError, OSError, TimeoutError) as exc:
+                    last_error = exc
                     print(
-                        f"[h3][progress] file {index}/{count} | {item['name']} | "
-                        f"current {current_percent:.1f}% ({downloaded / (1024**3):.2f}/"
-                        f"{total / (1024**3):.2f} GB) | overall {overall:.1f}% "
-                        f"({(batch_done + downloaded) / (1024**3):.2f}/"
-                        f"{batch_total / (1024**3):.2f} GB) | speed "
-                        f"{speed / (1024**2):.1f} MB/s | elapsed {format_duration(elapsed)} | "
-                        f"ETA {format_duration(eta)}",
+                        f"[h3][range-retry] {item['name']} bytes={start}-{end} "
+                        f"attempt={attempt}/3 error={type(exc).__name__}",
                         flush=True,
                     )
-                    next_report = downloaded + 256 * 1024 * 1024
-        temporary.replace(destination)
+                    if attempt < 3:
+                        time.sleep(attempt * 2)
+            raise OSError(f"range download failed for {item['name']}: {last_error}")
+
+        # Direct-URL items only (manifest items with a partial file are skipped above): resume
+        # only when the existing .part prefix is demonstrably from this URL.
+        existing_size = temporary.stat().st_size if temporary.exists() else 0
+        # A completed-looking file from an older truncated transfer is not trusted.
+        if destination.exists() and destination.stat().st_size < total:
+            if temporary.exists():
+                temporary.unlink()
+            destination.replace(temporary)
+            existing_size = temporary.stat().st_size
+        elif destination.exists() and destination.stat().st_size != total:
+            destination.unlink()
+        if existing_size > total:
+            temporary.unlink(missing_ok=True)
+            existing_size = 0
+        if existing_size:
+            prefix_end = min(1023, total - 1)
+            with temporary.open("rb") as prefix:
+                same = prefix.read(prefix_end + 1) == read_retry(0, prefix_end)
+            if not same:
+                print(f"[h3][resume-reset] {item['name']} prefix did not match source", flush=True)
+                temporary.unlink(missing_ok=True)
+                existing_size = 0
+
+        downloaded = existing_size
         print(
-            f"[h3][downloaded] {destination} ({downloaded / (1024**3):.2f} GB)",
+            f"[h3][download-start] {item['name']} ({total / (1024**3):.2f} GB)"
+            + (f" resume={downloaded / (1024**3):.2f} GB" if downloaded else ""),
             flush=True,
         )
-        return downloaded
+        chunk_size = 256 * 1024 * 1024
+        with temporary.open("ab") as output:
+            while downloaded < total:
+                end = min(downloaded + chunk_size, total) - 1
+                data = read_retry(downloaded, end)
+                output.write(data)
+                output.flush()
+                downloaded += len(data)
+                elapsed = time.monotonic() - batch_started
+                overall = (batch_done + downloaded) / batch_total * 100 if batch_total else 100
+                speed = (batch_done + downloaded) / elapsed if elapsed > 0 else 0
+                eta = (batch_total - batch_done - downloaded) / speed if speed > 0 else 0
+                print(
+                    f"[h3][progress] file {index}/{count} | {item['name']} | "
+                    f"current {downloaded / total * 100:.1f}% ({downloaded / (1024**3):.2f}/"
+                    f"{total / (1024**3):.2f} GB) | overall {overall:.1f}% "
+                    f"({(batch_done + downloaded) / (1024**3):.2f}/"
+                    f"{batch_total / (1024**3):.2f} GB) | speed "
+                    f"{speed / (1024**2):.1f} MB/s | elapsed {format_duration(elapsed)} | "
+                    f"ETA {format_duration(eta)}",
+                    flush=True,
+                )
+        actual_size = temporary.stat().st_size
+        if actual_size != total:
+            raise OSError(f"incomplete model {item['name']}: got {actual_size} bytes, expected {total}")
+        temporary.replace(destination)
+        print(
+            f"[h3][downloaded] {destination} ({actual_size / (1024**3):.2f} GB)",
+            flush=True,
+        )
+        return actual_size
     except (HTTPError, URLError, OSError) as exc:
-        temporary.unlink(missing_ok=True)
+        # Keep the .part for resume unless it is oversized or the disk is full.
+        if getattr(exc, "errno", None) == errno.ENOSPC or (temporary.exists() and temporary.stat().st_size > expected_size):
+            temporary.unlink(missing_ok=True)
         fail(f"download failed for {item['name']}: {exc}")
+
+
+def fetch_extra(extra: list[dict], root: Path, mode: str = "missing") -> None:
+    """Download recipe/upscaler files (direct URLs outside the Comfy-Org manifest)."""
+    items = [{**item, "path": item["url"], "direct_url": True} for item in extra]
+    sizes = file_sizes("", items)
+    total_size = sum(sizes[item["path"]] for item in items)
+    print(f"[h3] selected {len(items)} recipe file(s), total {total_size / (1024**3):.2f} GB", flush=True)
+    if mode == "probe":
+        for item in items:
+            probe(item, root, max(1024, int(os.environ.get("MODEL_PROBE_BYTES", "1048576"))))
+        return
+    done, started = 0, time.monotonic()
+    for index, item in enumerate(items, 1):
+        done += download(item, root, index, len(items), total_size, done, started, sizes[item["path"]])
 
 
 def main() -> None:
@@ -228,13 +316,17 @@ def main() -> None:
         byte_count = max(1024, int(os.environ.get("MODEL_PROBE_BYTES", "1048576")))
         for item in items:
             probe(item, root, byte_count)
+        fetch_extra(recipe_items(boot_recipe()[0]), root, mode)
         print("[h3] probe complete; no full model was downloaded")
         return
 
     batch_done = 0
     batch_started = time.monotonic()
     for index, item in enumerate(items, 1):
-        batch_done += download(item, root, index, len(items), total_size, batch_done, batch_started)
+        batch_done += download(item, root, index, len(items), total_size, batch_done, batch_started, sizes[item["path"]])
+    recipe, fallback = boot_recipe()
+    print(f"[h3] video recipe={recipe}" + (f" (H3_RECIPE={fallback!r} unknown, fell back to base)" if fallback else ""), flush=True)
+    fetch_extra(recipe_items(recipe), root)
     elapsed = time.monotonic() - batch_started
     print(f"[h3] model download complete: {len(items)} files, {total_size / (1024**3):.2f} GB, elapsed {format_duration(elapsed)}", flush=True)
 

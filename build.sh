@@ -29,6 +29,7 @@ common_env=(
   -e "COMFYUI_ARGS=${comfy_args}"
   -e "COMFYUI_API_BASE=${COMFYUI_API_BASE:-http://localhost:18188}"
   -e CF_TOKEN
+  -e H3_RECIPE
   -e "OPEN_BUTTON_PORT=${OPEN_BUTTON_PORT:-1111}"
   -e "OPEN_BUTTON_TOKEN=${OPEN_BUTTON_TOKEN:-1}"
   -e "JUPYTER_DIR=${JUPYTER_DIR:-/}"

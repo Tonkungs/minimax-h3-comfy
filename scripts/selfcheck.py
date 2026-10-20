@@ -84,12 +84,12 @@ h3_control.comfy_request = real_request
 # link_models against temp dirs
 tmp = Path(tempfile.mkdtemp())
 h3_control.MODEL_ROOT, h3_control.COMFYUI_DIR = tmp / "models", tmp / "comfy"
-for it in h3_control.selected_items():
+for it in h3_control.boot_items():
     src = h3_control.MODEL_ROOT / it["destination"] / it["name"]
     src.parent.mkdir(parents=True, exist_ok=True)
     src.write_text("x")
 assert h3_control.link_models() == (True, [])
-for it in h3_control.selected_items():
+for it in h3_control.boot_items():
     tgt = h3_control.COMFYUI_DIR / "models" / it["destination"] / it["name"]
     assert tgt.is_symlink() and tgt.resolve() == (h3_control.MODEL_ROOT / it["destination"] / it["name"]).resolve()
 assert h3_control.link_models() == (False, [])
@@ -111,6 +111,84 @@ sig = h3_control.manifest_signature()
 os.environ["DOWNLOAD_MODE"] = "skip"
 assert h3_control.manifest_signature() != sig
 del os.environ["DOWNLOAD_MODE"]
+
+# video recipes: table, file mapping, unknown -> base
+assert set(h3_control.RECIPES) == {"base", "smd8", "smd4vsa"}
+def recipe_names(r):
+    return sorted(i["name"] for i in h3_control.recipe_items(r))
+up = "minimax_h3_latent_upscaler_3d_conv_v1_fp16.safetensors"
+assert recipe_names("base") == [up]
+assert recipe_names("smd8") == sorted([up, "SMD-MiniMax-H3-Ref2VA-8step.safetensors"])
+assert recipe_names("smd4vsa") == sorted([up, "SMD-MiniMax-H3-Ref2VA-4step.safetensors", "fasth3_vsa_gate.safetensors"])
+for r in h3_control.RECIPES:
+    for i in h3_control.recipe_items(r):
+        assert i["url"].startswith("https://huggingface.co/") and i["destination"] in h3_control.RECIPE_DESTINATIONS
+assert {i["destination"] for i in h3_control.recipe_items("smd4vsa")} == {"loras", "latent_upscale_models"}
+for raw, want in (("smd8", ("smd8", None)), ("", ("base", None)), ("nope", ("base", "nope")), ("../x", ("base", "../x"))):
+    os.environ["H3_RECIPE"] = raw
+    assert h3_control.boot_recipe() == want, raw
+os.environ.pop("H3_RECIPE")
+
+# prepare-request validation
+parse = h3_control.parse_prepare_request
+assert parse(b'{"recipe":"smd8"}') == "smd8"
+for bad in (b"", b"nope", b"[]", b'{"recipe":"evil.safetensors"}', b'{"recipe":1}', b'{"recipe":null}', b"{}"):
+    assert parse(bad) is None, bad
+
+# signature includes the recipe; status fields present
+sig_base = h3_control.manifest_signature()
+os.environ["H3_RECIPE"] = "smd8"
+assert h3_control.manifest_signature() != sig_base
+assert any(f["name"].startswith("SMD-") for f in h3_control.status_payload()["files"])
+st = h3_control.status_payload()
+assert st["recipe"] == "smd8" and st["recipe_fallback"] is None and st["recipes_ready"] == ["base"]  # upscaler created by the link test
+assert set(st["prepare"]) == {"recipe", "running", "ok", "error", "started_at", "finished_at"}
+os.environ.pop("H3_RECIPE")
+assert h3_control.status_payload()["recipe"] == "base"
+
+# start_prepare single-run guard and prepare_job outcome (fake download_models, temp lock)
+import threading, types, http.client, json as _json  # noqa: E402
+from http.server import ThreadingHTTPServer  # noqa: E402
+
+_saved = (h3_control.PREPARE_LOCK_PATH, h3_control.prepare_job, sys.modules.get("download_models"))
+h3_control.PREPARE_LOCK_PATH = Path(tempfile.mkdtemp()) / "prepare.lock"
+try:
+    h3_control.prepare_job = lambda recipe: None  # stub: stays "running"
+    assert h3_control.start_prepare("smd8") is True
+    assert h3_control.start_prepare("smd4vsa") is False and h3_control.prepare_snapshot()["recipe"] == "smd8"
+    h3_control.prepare_job = _saved[1]
+
+    def _boom(*_a, **_k):
+        exc = SystemExit(1)
+        exc.h3_message = "boom"
+        raise exc
+
+    sys.modules["download_models"] = types.SimpleNamespace(fetch_extra=_boom)
+    h3_control.prepare_job("smd8")
+    snap = h3_control.prepare_snapshot()
+    assert snap["running"] is False and snap["ok"] is False and snap["error"] == "boom", snap
+
+    # 409 when downloads are disabled
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), h3_control.Handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    for mode, code in (("skip", 409), ("probe", 409), ("missing", 400)):
+        os.environ["DOWNLOAD_MODE"] = mode
+        conn = http.client.HTTPConnection("127.0.0.1", srv.server_address[1], timeout=5)
+        conn.request("POST", "/h3/prepare", body=b"{}")
+        resp = conn.getresponse()
+        assert resp.status == code, (mode, resp.status)
+        if code == 409:
+            assert _json.loads(resp.read()) == {"error": "downloads disabled"}
+        conn.close()
+    srv.shutdown()
+finally:
+    os.environ.pop("DOWNLOAD_MODE", None)
+    h3_control.PREPARE_LOCK_PATH, h3_control.prepare_job = _saved[0], _saved[1]
+    if _saved[2] is None:
+        sys.modules.pop("download_models", None)
+    else:
+        sys.modules["download_models"] = _saved[2]
+    h3_control.PREPARE.update(recipe=None, running=False, ok=None, error=None, started_at=None, finished_at=None)
 
 # Dockerfile ARG matches VERSION
 m = re.search(r"^ARG H3_IMAGE_VERSION=(\S+)", (ROOT / "Dockerfile").read_text(), re.M)

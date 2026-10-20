@@ -21,7 +21,7 @@ cd minimax-h3-vast-image
 # For local build, the default `minimax-h3-comfy` is enough.
 # For Docker Hub, replace this with your lowercase Docker Hub namespace.
 export IMAGE_NAME=yourdockerhubuser/minimax-h3-comfy
-export IMAGE_TAG=1.5.0
+export IMAGE_TAG=1.6.0
 ./build.sh build
 ```
 
@@ -178,7 +178,7 @@ starts), and a
 `files` array with `name`, `destination`, `expected_bytes`, and
 `downloaded_bytes`. Expected sizes come from selected manifest URLs; they are
 `null` when Hugging Face metadata is unreachable. Downloaded bytes include the
-current `.part` file. This release reports `image_version: "1.5.0"`, aligned
+current `.part` file. This release reports `image_version: "1.6.0"`, aligned
 with the GitHub Actions image tag and `VERSION` file.
 
 `POST /h3/selftest` starts one bundled-reference Ref2VA job (512x512, 3
@@ -189,6 +189,31 @@ required nodes and inputs. Poll `GET /h3/status`: its `selftest` field holds
 `{run_id, ok, duration_s, has_audio, output_bytes, error, started_at, finished_at, running}` for
 the last run; match `run_id` to the 202 response (ffprobe checks duration and audio stream); generation can take
 several minutes depending on the host.
+
+### Video recipes (`H3_RECIPE`)
+
+The container env var `H3_RECIPE` picks the video recipe at rent time: `base`
+(default), `smd8` (SMD 8-step LoRA) or `smd4vsa` (SMD 4-step LoRA plus the
+`fasth3_vsa_gate` LoRA). Absent or unknown values fall back to `base`; the
+rejected value is reported as `recipe_fallback` in the status. Every recipe
+also gets the LBH latent upscaler (`latent_upscale_models/`). Recipe files are
+downloaded to `MODEL_ROOT` at boot with the same missing/resume logic and
+linked into `ComfyUI/models/{loras,latent_upscale_models}`. The custom nodes
+`ComfyUI-Ref2VA-VSA` and `Comfyui_Minimax_h3_latent_Upscaler` are baked in at
+pinned commits. The prepared stamp includes the recipe, so a different recipe
+re-prepares.
+
+`POST /h3/prepare` with body `{"recipe":"smd8"}` downloads and links another
+recipe's missing files in the background (same `/workspace/.h3-prepare.lock`
+as boot). It answers `202 {"started":true,"recipe":"smd8"}`,
+`202 {"started":false,"running":true}` while a prepare is running, or
+`400 {"error":"unknown recipe"}` (recipes are matched against a server-side
+table, never raw filenames).
+
+`GET /h3/status` additionally returns `recipe` (boot recipe),
+`recipe_fallback`, `recipes_ready` (recipes whose files are all present) and
+`prepare` (`{recipe, running, ok, error, started_at, finished_at}`). `files`
+lists the boot recipe's files plus any recipe being prepared.
 
 ### TLS proof (cert pinning)
 
