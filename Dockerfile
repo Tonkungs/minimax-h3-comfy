@@ -2,7 +2,7 @@ FROM vastai/comfy:v0.36.0-cuda-13.2-py312
 
 USER root
 
-ARG H3_IMAGE_VERSION=1.7.0
+ARG H3_IMAGE_VERSION=1.7.1
 
 ENV MODEL_ROOT=/workspace/models \
     MODEL_PRESET=5090 \

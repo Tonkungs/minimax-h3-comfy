@@ -220,7 +220,7 @@ assert any(a.startswith("pad=ceil(iw/2)*2") for a in x)
 
 # version agreement
 ver = (ROOT / "VERSION").read_text().strip()
-assert ver == "1.7.0", ver
+assert ver == "1.7.1", ver
 assert f"IMAGE_TAG: {ver}" in (ROOT / ".github" / "workflows" / "docker-publish.yml").read_text()
 df = (ROOT / "Dockerfile").read_text()
 caps = re.search(r"NVIDIA_DRIVER_CAPABILITIES=(\S+)", df)

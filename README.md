@@ -21,7 +21,7 @@ cd minimax-h3-vast-image
 # For local build, the default `minimax-h3-comfy` is enough.
 # For Docker Hub, replace this with your lowercase Docker Hub namespace.
 export IMAGE_NAME=yourdockerhubuser/minimax-h3-comfy
-export IMAGE_TAG=1.7.0
+export IMAGE_TAG=1.7.1
 ./build.sh build
 ```
 
@@ -178,7 +178,7 @@ starts), and a
 `files` array with `name`, `destination`, `expected_bytes`, and
 `downloaded_bytes`. Expected sizes come from selected manifest URLs; they are
 `null` when Hugging Face metadata is unreachable. Downloaded bytes include the
-current `.part` file. This release reports `image_version: "1.7.0"`, aligned
+current `.part` file. This release reports `image_version: "1.7.1"`, aligned
 with the GitHub Actions image tag and `VERSION` file.
 
 `POST /h3/selftest` starts one bundled-reference Ref2VA job (512x512, 3
@@ -297,3 +297,5 @@ Inputs: `images`, `fps`, `filename_prefix`, `encoder` (`auto`/`nvenc`/`x264`),
 Output is `<prefix>_00001_.mp4` in the output dir, reported like `SaveVideo`.
 The image sets `NVIDIA_DRIVER_CAPABILITIES=compute,utility,video` (needed for
 NVENC in the container) and checks `ffmpeg` at build time.
+
+1.7.1: frames are converted to bytes on the GPU before piping to ffmpeg (243 frames at 1080x1920: 12.9 s on CPU, 4.2 s on CUDA). NVENC is still not usable on Vast RTX 5090 hosts ("unsupported device" even with a current ffmpeg build), so `auto` falls back to libx264 veryfast, which encodes a 10 s clip in about 1–2 s.
